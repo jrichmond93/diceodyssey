@@ -21,7 +21,7 @@ const SHRINK_INTERVAL = 5
 const SHRINK_COUNT = 2
 const WINNING_MACGUFFINS = 5
 const SABOTAGE_RANGE = 2
-const MAX_SKIPPED_TURNS = 5
+const MAX_SKIPPED_TURNS = 3
 
 const ACTION_AFFINITY_COLOR: Record<ActionType, Color> = {
   move: 'blue',

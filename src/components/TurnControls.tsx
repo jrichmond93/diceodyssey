@@ -30,7 +30,7 @@ export function TurnControls({
           aria-label="Resolve turn"
           className="rounded-md bg-cyan-500 px-4 py-2 font-semibold text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-300"
         >
-          Resolve Turn
+          Resolve Turn (Move → Claim → Sabotage)
         </button>
         <button
           type="button"
@@ -50,7 +50,7 @@ export function TurnControls({
       {!isAI && !disabled && (
         <p className="mt-3 text-xs text-slate-400">
           {!canSubmit ? 'Resolve Turn is locked until all 6 dice are assigned. ' : ''}
-          Resolve Turn rolls all assigned dice, applies Move → Claim → Sabotage, then advances play. If your turn is skipped, just press Resolve Turn.
+          Resolve Turn rolls all assigned dice, applies Move → Claim → Sabotage, then shows the outcome in Turn Resolution. If your turn is skipped, just press Resolve Turn.
         </p>
       )}
       {isAI && !disabled && <p className="mt-3 text-sm text-cyan-200">AI is thinking...</p>}

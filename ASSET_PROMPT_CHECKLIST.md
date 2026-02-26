@@ -15,6 +15,9 @@ Created so far:
 - [x] `public/assets/ui/die-green.png`
 - [x] `public/assets/ui/die-neutral.png`
 - [x] `public/assets/ui/dice-set-overview.png`
+- [x] `public/assets/ui/icon-status-success.svg`
+- [x] `public/assets/ui/icon-status-fail.svg`
+- [x] `public/assets/ui/icon-status-neutral.svg`
 
 ## Global Art Direction (use in every prompt)
 

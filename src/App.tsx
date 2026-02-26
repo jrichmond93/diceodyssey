@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
+import { Navigate, useLocation } from 'react-router-dom'
+import { AppFooter } from './components/AppFooter'
 import { DicePool } from './components/DicePool'
 import { GalaxyBoard } from './components/GalaxyBoard'
 import { PlayerStatus } from './components/PlayerStatus'
 import { TurnResolution } from './components/TurnResolution'
 import { TurnLog } from './components/TurnLog'
 import { TurnControls } from './components/TurnControls'
+import { AboutPage } from './pages/AboutPage'
 import { emptyAllocation, gameReducer, initialGameState } from './reducers/gameReducer'
 import type { Allocation, Difficulty, GameMode, TurnResolutionPlaybackStage } from './types'
 import { buildPostGameNarrative } from './utils/buildPostGameNarrative'
@@ -22,6 +25,7 @@ const allDiceAllocated = (allocation: Allocation): boolean =>
   allocation.move.length + allocation.claim.length + allocation.sabotage.length === 6
 
 function App() {
+  const location = useLocation()
   const [state, dispatch] = useReducer(gameReducer, initialGameState)
   const [mode, setMode] = useState<GameMode>('single')
   const [difficulty, setDifficulty] = useState<Difficulty>('medium')
@@ -97,6 +101,14 @@ function App() {
       setShowDebrief(true)
     }
   }, [state.winnerId])
+
+  useEffect(() => {
+    if (!state.started || typeof window === 'undefined') {
+      return
+    }
+
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }, [state.started])
 
   const winnerName = useMemo(
     () => state.players.find((player) => player.id === state.winnerId)?.name,
@@ -293,10 +305,24 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  if (location.pathname === '/about') {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <AboutPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (location.pathname !== '/') {
+    return <Navigate to="/" replace />
+  }
+
   if (!state.started) {
     return (
-      <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col justify-center p-6">
-        <div className="rounded-2xl border border-slate-700 bg-slate-950/80 p-6">
+      <div className="flex min-h-screen flex-col">
+        <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center p-6">
+          <div className="rounded-2xl border border-slate-700 bg-slate-950/80 p-6">
           <img
             src="/assets/branding/hero-banner.png"
             alt="Dice Odyssey hero banner"
@@ -432,14 +458,17 @@ function App() {
             />
             Enable debug logging (captures every turn for post-game analysis)
           </label>
+          </div>
         </div>
+        <AppFooter />
       </div>
     )
   }
 
   return (
-    <DndProvider backend={HTML5Backend}>
-      <div className="mx-auto w-full max-w-6xl space-y-4 p-4 md:p-6">
+    <div className="flex min-h-screen flex-col">
+      <DndProvider backend={HTML5Backend}>
+        <div className="mx-auto w-full max-w-6xl flex-1 space-y-4 p-4 md:p-6">
         <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-950/70 p-4">
           <div className="flex items-center gap-3">
             <img
@@ -531,10 +560,10 @@ function App() {
                 <p className="font-semibold text-cyan-200">Turn Flow</p>
                 <img
                   src="/assets/infographics/turn-flow-infographic.png"
-                  alt="Turn flow infographic: Allocate 6 dice, End Turn, Resolve Move then Claim then Sabotage"
+                  alt="Turn flow infographic: Allocate 6 dice, Resolve Turn, Resolve Move then Claim then Sabotage"
                   className="mt-2 w-full rounded border border-slate-700 object-cover"
                 />
-                <p className="mt-1">1) Allocate all 6 dice. 2) Press Resolve Turn. 3) Move, Claim, then Sabotage resolve using color affinity (+1 match, -1 off-color, min 1).</p>
+                <p className="mt-1">1) Allocate all 6 dice. 2) Press Resolve Turn. 3) Watch Move, Claim, then Sabotage outcomes in Turn Resolution using color affinity (+1 match, -1 off-color, min 1).</p>
               </div>
               <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
                 <p className="font-semibold text-cyan-200">Board Reading</p>
@@ -542,7 +571,7 @@ function App() {
               </div>
               <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
                 <p className="font-semibold text-cyan-200">Key Rules</p>
-                <p className="mt-1">Sabotage targets nearest rival within 2 spaces. Skip turns = sabotage total minus defense (minimum 0), capped at 5. After a forced skip, that player gets temporary skip-immunity until their next playable turn.</p>
+                <p className="mt-1">Sabotage targets nearest rival within 2 spaces. Skip turns = sabotage total minus defense (minimum 0), capped at 3. After a forced skip, that player gets temporary skip-immunity until their next playable turn.</p>
               </div>
               <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
                 <p className="font-semibold text-cyan-200">Pacing + UI Colors</p>
@@ -631,8 +660,10 @@ function App() {
             </details>
           </section>
         )}
-      </div>
-    </DndProvider>
+        </div>
+      </DndProvider>
+      <AppFooter />
+    </div>
   )
 }
 

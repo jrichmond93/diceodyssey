@@ -28,6 +28,9 @@ const colorChipClass: Record<DebugDieRoll['color'], string> = {
 }
 
 const macguffinTokenIcon = '/assets/ui/icon-macguffin-token.png'
+const statusSuccessIcon = '/assets/ui/icon-status-success.svg'
+const statusFailIcon = '/assets/ui/icon-status-fail.svg'
+const statusNeutralIcon = '/assets/ui/icon-status-neutral.svg'
 
 const getNarrativeToneClass = (tone: 'good' | 'neutral' | 'bad'): string => {
   if (tone === 'good') {
@@ -39,6 +42,30 @@ const getNarrativeToneClass = (tone: 'good' | 'neutral' | 'bad'): string => {
   }
 
   return 'border-slate-600 bg-slate-900/40 text-slate-200'
+}
+
+const getOutcomeToneClass = (tone: 'good' | 'neutral' | 'bad'): string => {
+  if (tone === 'good') {
+    return 'border-emerald-400/60 bg-emerald-900/20 text-emerald-100'
+  }
+
+  if (tone === 'bad') {
+    return 'border-amber-400/60 bg-amber-900/20 text-amber-100'
+  }
+
+  return 'border-slate-600 bg-slate-900/40 text-slate-200'
+}
+
+const getOutcomeIconPath = (tone: 'good' | 'neutral' | 'bad'): string => {
+  if (tone === 'good') {
+    return statusSuccessIcon
+  }
+
+  if (tone === 'bad') {
+    return statusFailIcon
+  }
+
+  return statusNeutralIcon
 }
 
 const buildNarrative = (summary: TurnResolutionSnapshot) => {
@@ -177,6 +204,81 @@ export function TurnResolution({ summary, resolving, playbackStage }: TurnResolu
 
       {summary && (
         <div className="mt-3 space-y-2 text-sm text-slate-200">
+          <div className="rounded border border-slate-700 bg-slate-900/50 p-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-cyan-200">What happened</p>
+            <p className="mt-1 text-xs text-slate-300">After pressing Resolve Turn, read these outcomes in order.</p>
+            <div className="mt-2 space-y-1.5">
+              {(() => {
+                const movedBy = Math.max(0, summary.position.after - summary.position.before)
+                const moveTone: 'good' | 'neutral' | 'bad' = movedBy > 0 ? 'good' : 'neutral'
+
+                const claimTone: 'good' | 'neutral' | 'bad' =
+                  summary.totals.gainedMacGuffins > 0
+                    ? 'good'
+                    : summary.claim.landedPlanetId && summary.rolls.claim.length > 0
+                      ? 'bad'
+                      : 'neutral'
+
+                const sabotageApplied = summary.skips.appliedToTarget?.amount ?? 0
+                const sabotageBlocked = Boolean(summary.skips.appliedToTarget?.blockedByImmunity)
+                const sabotageTone: 'good' | 'neutral' | 'bad' =
+                  sabotageApplied > 0 ? 'good' : summary.totals.sabotage > 0 && sabotageBlocked ? 'bad' : 'neutral'
+
+                const claimMessage = summary.claim.landedPlanetId
+                  ? summary.totals.gainedMacGuffins > 0
+                    ? `+${summary.totals.gainedMacGuffins} MacGuffin on P${summary.claim.landedPlanetId}`
+                    : summary.rolls.claim.length > 0
+                      ? `No gain on P${summary.claim.landedPlanetId}`
+                      : `No claim roll on P${summary.claim.landedPlanetId}`
+                  : 'No landed planet'
+
+                const sabotageMessage = sabotageApplied > 0
+                  ? `${summary.skips.appliedToTarget?.targetName ?? 'Rival'} +${sabotageApplied} skip`
+                  : summary.totals.sabotage > 0 && sabotageBlocked
+                    ? `${summary.skips.appliedToTarget?.targetName ?? 'Target'} blocked sabotage`
+                    : summary.totals.sabotage > 0
+                      ? 'No sabotage impact'
+                      : 'No sabotage roll'
+
+                const outcomes = [
+                  {
+                    label: 'Move',
+                    tone: moveTone,
+                    message: `+${movedBy} spaces (${summary.position.before} → ${summary.position.after})`,
+                  },
+                  {
+                    label: 'Claim',
+                    tone: claimTone,
+                    message: claimMessage,
+                  },
+                  {
+                    label: 'Sabotage',
+                    tone: sabotageTone,
+                    message: sabotageMessage,
+                  },
+                ]
+
+                return outcomes.map((outcome) => (
+                  <div
+                    key={outcome.label}
+                    className={`flex items-center justify-between gap-2 rounded border px-2 py-1 text-xs ${getOutcomeToneClass(outcome.tone)}`}
+                  >
+                    <p className="flex items-center gap-1.5 font-semibold uppercase tracking-wide">
+                      <img
+                        src={getOutcomeIconPath(outcome.tone)}
+                        alt=""
+                        aria-hidden="true"
+                        className="h-4 w-4"
+                      />
+                      <span>{outcome.label}</span>
+                    </p>
+                    <p className="text-right">{outcome.message}</p>
+                  </div>
+                ))
+              })()}
+            </div>
+          </div>
+
           {narrative && (
             <div className={`rounded border p-2 ${getNarrativeToneClass(narrative.tone)}`}>
               <p className="text-sm font-semibold">{narrative.headline}</p>

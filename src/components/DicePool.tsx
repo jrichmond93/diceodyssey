@@ -192,7 +192,7 @@ export function DicePool({
             onClick={onAllocatePreferred}
             disabled={disabled}
           >
-            Allocate Preferred (overwrite all 6)
+            Allocate Preferred
           </button>
         </div>
         <p className="mt-0.5 text-xs leading-tight text-slate-400">First turn checklist: assign all 6 dice, press Resolve Turn, then read results in Turn Log.</p>
@@ -230,7 +230,7 @@ export function DicePool({
       </div>
 
       <div className="text-xs text-slate-400">
-        <p>Any die can go in any slot. Color affinity applies on roll results. Matching color to slot gets +1; off-color gets -1 (minimum 1). Move advances your ship (capped at galaxy end). Claim checks your landed planet. Sabotage targets nearest rival within 2 spaces; defense reduces skips, max stack is 5.</p>
+        <p>Any die can go in any slot. Color affinity applies on roll results. Matching color to slot gets +1; off-color gets -1 (minimum 1). Move advances your ship (capped at galaxy end). Claim checks your landed planet. Sabotage targets nearest rival within 2 spaces; defense reduces skips, max stack is 3.</p>
       </div>
     </div>
   )
