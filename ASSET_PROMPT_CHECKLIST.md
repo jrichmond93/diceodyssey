@@ -10,6 +10,11 @@ Created so far:
 - [x] `public/assets/branding/hero-banner.png`
 - [x] `public/assets/ui/icon-action-move.png`
 - [x] `public/assets/ui/icon-action-claim.png`
+- [x] `public/assets/ui/die-red.png`
+- [x] `public/assets/ui/die-blue.png`
+- [x] `public/assets/ui/die-green.png`
+- [x] `public/assets/ui/die-neutral.png`
+- [x] `public/assets/ui/dice-set-overview.png`
 
 ## Global Art Direction (use in every prompt)
 
@@ -52,23 +57,23 @@ Created so far:
 
 ### Dice Assets
 
-- [ ] `public/assets/ui/die-red.svg` (PNG fallback: 128x128)
+- [x] `public/assets/ui/die-red.svg` (PNG fallback: 128x128, PNG completed)
   - Prompt:
     - Minimal vector icon for a red six-sided die used in Dice Odyssey. Rounded-corner square die body with clearly visible pips, subtle sci-fi bevel, and strong silhouette. Transparent background, centered, no text, no border frame. Red primary with dark-neutral shadows and tiny amber warning accent. Must stay readable at 24px.
 
-- [ ] `public/assets/ui/die-blue.svg` (PNG fallback: 128x128)
+- [x] `public/assets/ui/die-blue.svg` (PNG fallback: 128x128, PNG completed)
   - Prompt:
     - Minimal vector icon for a blue six-sided die used in Dice Odyssey. Rounded-corner square die body with clearly visible pips, subtle sci-fi bevel, and strong silhouette. Transparent background, centered, no text, no border frame. Cyan/blue primary with dark-neutral shadows. Must stay readable at 24px.
 
-- [ ] `public/assets/ui/die-green.svg` (PNG fallback: 128x128)
+- [x] `public/assets/ui/die-green.svg` (PNG fallback: 128x128, PNG completed)
   - Prompt:
     - Minimal vector icon for a green six-sided die used in Dice Odyssey. Rounded-corner square die body with clearly visible pips, subtle sci-fi bevel, and strong silhouette. Transparent background, centered, no text, no border frame. Emerald/green primary with dark-neutral shadows and a subtle cyan glow. Must stay readable at 24px.
 
-- [ ] `public/assets/ui/die-neutral.svg` (PNG fallback: 128x128)
+- [x] `public/assets/ui/die-neutral.svg` (PNG fallback: 128x128, PNG completed)
   - Prompt:
     - Minimal vector icon for a neutral/default six-sided die used in Dice Odyssey for generic UI states. Rounded-corner square die body with clear pips, semi-flat sci-fi style, transparent background, centered, no text. Slate/gray primary with cyan edge light. Must stay readable at 24px.
 
-- [ ] `public/assets/ui/dice-set-overview.png` — target 800x400
+- [x] `public/assets/ui/dice-set-overview.png` — target 800x400
   - Prompt:
     - UI-ready showcase image of four Dice Odyssey dice (red, blue, green, neutral) arranged cleanly in a row on transparent or very dark background. Semi-flat sci-fi style, crisp edges, no text, no extra props, generous spacing for readability. High contrast and uncluttered.
 

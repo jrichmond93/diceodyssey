@@ -6,6 +6,25 @@ export type GameMode = 'single' | 'hotseat'
 
 export type Difficulty = 'easy' | 'medium'
 
+export type TurnResolutionStage = 'idle' | 'resolving'
+
+export type TurnResolutionPlaybackStage = 'idle' | 'move' | 'claim' | 'sabotage' | 'post'
+
+export interface TurnResolutionState {
+  active: boolean
+  stage: TurnResolutionStage
+  message: string
+}
+
+export interface TurnResolutionSnapshot extends DebugTurnRecord {
+  sabotageMessage: string
+  claim: {
+    landedPlanetId?: number
+    landedPlanetFace?: number
+    successes: number
+  }
+}
+
 export interface Die {
   id: string
   color: Color
@@ -104,6 +123,8 @@ export interface GameState {
   log: TurnEvent[]
   debugEnabled: boolean
   debugLog: DebugTurnRecord[]
+  turnResolution: TurnResolutionState
+  latestTurnResolution?: TurnResolutionSnapshot
 }
 
 export interface InitGamePayload {
@@ -117,6 +138,8 @@ export interface InitGamePayload {
 export type GameAction =
   | { type: 'INIT_GAME'; payload: InitGamePayload }
   | { type: 'ALLOCATE_DICE'; payload: Allocation }
+  | { type: 'START_TURN_RESOLUTION'; payload?: { stage?: TurnResolutionStage; message?: string } }
+  | { type: 'END_TURN_RESOLUTION' }
   | { type: 'RESOLVE_TURN' }
   | { type: 'NEXT_PLAYER' }
   | { type: 'NEW_GAME' }

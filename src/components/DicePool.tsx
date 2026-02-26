@@ -10,6 +10,7 @@ interface DicePoolProps {
   allocation: Allocation
   disabled?: boolean
   onAllocationChange: (next: Allocation) => void
+  onAllocatePreferred: () => void
 }
 
 interface DragItem {
@@ -39,11 +40,13 @@ const actionIcon: Partial<Record<ActionType, string>> = {
   claim: '/assets/ui/icon-action-claim.png',
 }
 
-const colorClass: Record<Die['color'], string> = {
-  red: 'bg-red-500',
-  blue: 'bg-blue-500',
-  green: 'bg-emerald-500',
+const dieImageByColor: Record<Die['color'], string> = {
+  red: '/assets/ui/die-red.png',
+  blue: '/assets/ui/die-blue.png',
+  green: '/assets/ui/die-green.png',
 }
+
+const neutralDieImage = '/assets/ui/die-neutral.png'
 
 const unassignedColorOrder: Record<Die['color'], number> = {
   blue: 0,
@@ -81,12 +84,17 @@ const DiceToken = ({ die, disabled }: { die: Die; disabled?: boolean }) => {
     <button
       ref={elementRef}
       aria-label={`Die ${die.color}`}
-      className={`h-10 w-10 rounded-full border border-slate-200 text-xs font-bold text-white shadow ${colorClass[die.color]} ${
+      className={`h-10 w-10 overflow-hidden rounded-md border border-slate-300/70 bg-slate-900 shadow ${
         isDragging ? 'opacity-40' : 'opacity-100'
       } ${disabled ? 'cursor-not-allowed' : 'cursor-grab'}`}
       type="button"
     >
-      d6
+      <img
+        src={dieImageByColor[die.color] ?? neutralDieImage}
+        alt=""
+        aria-hidden="true"
+        className="h-full w-full object-cover"
+      />
     </button>
   )
 }
@@ -140,7 +148,13 @@ const DropZone = ({
   )
 }
 
-export function DicePool({ dicePool, allocation, disabled, onAllocationChange }: DicePoolProps) {
+export function DicePool({
+  dicePool,
+  allocation,
+  disabled,
+  onAllocationChange,
+  onAllocatePreferred,
+}: DicePoolProps) {
   const byId = useMemo(() => new Map(dicePool.map((die) => [die.id, die])), [dicePool])
   const allocationRef = useRef(allocation)
 
@@ -170,8 +184,18 @@ export function DicePool({ dicePool, allocation, disabled, onAllocationChange }:
   return (
     <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-950/70 p-4">
       <div>
-        <h2 className="text-lg font-semibold text-slate-100">Dice Allocation</h2>
-        <p className="text-xs text-slate-400">First turn checklist: assign all 6 dice, press Resolve Turn, then read results in Turn Log.</p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold text-slate-100">Dice Allocation</h2>
+          <button
+            type="button"
+            className="rounded border border-cyan-300 px-2 py-1 text-xs font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={onAllocatePreferred}
+            disabled={disabled}
+          >
+            Allocate Preferred (overwrite all 6)
+          </button>
+        </div>
+        <p className="mt-0.5 text-xs leading-tight text-slate-400">First turn checklist: assign all 6 dice, press Resolve Turn, then read results in Turn Log.</p>
       </div>
 
       <DropZone title="Unassigned" onDropDie={(dieId) => moveDie(dieId, null)} disabled={disabled}>
@@ -205,11 +229,8 @@ export function DicePool({ dicePool, allocation, disabled, onAllocationChange }:
         ))}
       </div>
 
-      <div className="space-y-1 text-xs text-slate-400">
-        <p>Any die can go in any slot. Color affinity applies on roll results.</p>
-        <p>Matching color to slot gets +1; off-color gets -1 (minimum 1).</p>
-        <p>Move advances your ship (capped at galaxy end). Claim checks your landed planet.</p>
-        <p>Sabotage targets nearest rival within 2 spaces; defense reduces skips, max stack is 5.</p>
+      <div className="text-xs text-slate-400">
+        <p>Any die can go in any slot. Color affinity applies on roll results. Matching color to slot gets +1; off-color gets -1 (minimum 1). Move advances your ship (capped at galaxy end). Claim checks your landed planet. Sabotage targets nearest rival within 2 spaces; defense reduces skips, max stack is 5.</p>
       </div>
     </div>
   )

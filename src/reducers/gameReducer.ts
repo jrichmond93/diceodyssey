@@ -10,6 +10,8 @@ import {
   type InitGamePayload,
   type Planet,
   type Player,
+  type TurnResolutionSnapshot,
+  type TurnResolutionState,
 } from '../types'
 import { rollDie } from '../utils/rollDie'
 
@@ -26,6 +28,12 @@ const ACTION_AFFINITY_COLOR: Record<ActionType, Color> = {
   claim: 'green',
   sabotage: 'red',
 }
+
+const idleTurnResolution = (): TurnResolutionState => ({
+  active: false,
+  stage: 'idle',
+  message: '',
+})
 
 export const emptyAllocation = (): Allocation => ({
   move: [],
@@ -46,6 +54,8 @@ const initialState: GameState = {
   log: [],
   debugEnabled: false,
   debugLog: [],
+  turnResolution: idleTurnResolution(),
+  latestTurnResolution: undefined,
 }
 
 const appendDebugRecord = (state: GameState, record: DebugTurnRecord): GameState => {
@@ -393,7 +403,21 @@ const resolveCurrentPlayerTurn = (state: GameState): GameState => {
       notes: ['Turn skipped due to sabotage effect.'],
     }
 
-    return appendDebugRecord(withPostEffects, debugRecord)
+    const snapshot: TurnResolutionSnapshot = {
+      ...debugRecord,
+      sabotageMessage: 'No sabotage attempts.',
+      claim: {
+        landedPlanetId: undefined,
+        landedPlanetFace: undefined,
+        successes: 0,
+      },
+    }
+
+    const withDebug = appendDebugRecord(withPostEffects, debugRecord)
+    return {
+      ...withDebug,
+      latestTurnResolution: snapshot,
+    }
   }
 
   const allocation =
@@ -423,16 +447,21 @@ const resolveCurrentPlayerTurn = (state: GameState): GameState => {
   const landedPlanetIndex = movedTo - 1
   let nextGalaxy = [...state.galaxy]
   let gainedMacGuffins = 0
+  let claimSuccesses = 0
+  let landedPlanetId: number | undefined
+  let landedPlanetFace: number | undefined
 
   if (landedPlanetIndex >= 0 && landedPlanetIndex < nextGalaxy.length) {
     const landedPlanet = nextGalaxy[landedPlanetIndex]
+    landedPlanetId = landedPlanet.id
+    landedPlanetFace = landedPlanet.face
     nextGalaxy[landedPlanetIndex] = {
       ...landedPlanet,
       revealed: true,
     }
 
     if (!landedPlanet.claimed && claimTotal.length > 0) {
-      const claimSuccesses = claimTotal.filter((roll) => roll.final > landedPlanet.face).length
+      claimSuccesses = claimTotal.filter((roll) => roll.final > landedPlanet.face).length
       if (claimSuccesses > 0) {
         gainedMacGuffins = landedPlanet.face === 6 ? 2 : landedPlanet.face === 5 ? 1 : 0
 
@@ -567,7 +596,21 @@ const resolveCurrentPlayerTurn = (state: GameState): GameState => {
     ],
   }
 
-  return appendDebugRecord(withPostEffects, debugRecord)
+  const snapshot: TurnResolutionSnapshot = {
+    ...debugRecord,
+    sabotageMessage,
+    claim: {
+      landedPlanetId,
+      landedPlanetFace,
+      successes: claimSuccesses,
+    },
+  }
+
+  const withDebug = appendDebugRecord(withPostEffects, debugRecord)
+  return {
+    ...withDebug,
+    latestTurnResolution: snapshot,
+  }
 }
 
 export const gameReducer = (state: GameState = initialState, action: GameAction): GameState => {
@@ -585,6 +628,7 @@ export const gameReducer = (state: GameState = initialState, action: GameAction)
         difficulty: action.payload.difficulty,
         debugEnabled: action.payload.debugEnabled,
         debugLog: [],
+        latestTurnResolution: undefined,
         log: [
           {
             id: crypto.randomUUID(),
@@ -623,6 +667,28 @@ export const gameReducer = (state: GameState = initialState, action: GameAction)
       return {
         ...state,
         players,
+      }
+    }
+
+    case 'START_TURN_RESOLUTION': {
+      if (!state.started || state.winnerId) {
+        return state
+      }
+
+      return {
+        ...state,
+        turnResolution: {
+          active: true,
+          stage: action.payload?.stage ?? 'resolving',
+          message: action.payload?.message ?? 'Resolving turn activity...',
+        },
+      }
+    }
+
+    case 'END_TURN_RESOLUTION': {
+      return {
+        ...state,
+        turnResolution: idleTurnResolution(),
       }
     }
 

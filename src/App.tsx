@@ -1,16 +1,22 @@
-import { useEffect, useMemo, useReducer, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 import { DicePool } from './components/DicePool'
 import { GalaxyBoard } from './components/GalaxyBoard'
 import { PlayerStatus } from './components/PlayerStatus'
+import { TurnResolution } from './components/TurnResolution'
 import { TurnLog } from './components/TurnLog'
 import { TurnControls } from './components/TurnControls'
 import { emptyAllocation, gameReducer, initialGameState } from './reducers/gameReducer'
-import type { Allocation, Difficulty, GameMode } from './types'
+import type { Allocation, Difficulty, GameMode, TurnResolutionPlaybackStage } from './types'
 import { buildPostGameNarrative } from './utils/buildPostGameNarrative'
 
 const HELP_STORAGE_KEY = 'dice-odyssey-help-open'
+const AI_THINK_DELAY_MS = 600
+const RESOLVE_STAGE_DELAY_MS = 240
+const REDUCED_MOTION_STAGE_DELAY_MS = 80
+const REDUCED_MOTION_AI_DELAY_MS = 200
+const MACGUFFIN_TOKEN_ICON = '/assets/ui/icon-macguffin-token.png'
 
 const allDiceAllocated = (allocation: Allocation): boolean =>
   allocation.move.length + allocation.claim.length + allocation.sabotage.length === 6
@@ -26,6 +32,9 @@ function App() {
   const [debugEnabled, setDebugEnabled] = useState(false)
   const [draftAllocation, setDraftAllocation] = useState<Allocation>(emptyAllocation())
   const [showDebrief, setShowDebrief] = useState(false)
+  const [playbackStage, setPlaybackStage] = useState<TurnResolutionPlaybackStage>('idle')
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
+  const resolutionTimersRef = useRef<number[]>([])
   const [helpOpen, setHelpOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
       return false
@@ -35,23 +44,45 @@ function App() {
   })
 
   const currentPlayer = state.players[state.currentPlayerIndex]
+  const resolveStageDelay = prefersReducedMotion ? REDUCED_MOTION_STAGE_DELAY_MS : RESOLVE_STAGE_DELAY_MS
+  const aiThinkDelay = prefersReducedMotion ? REDUCED_MOTION_AI_DELAY_MS : AI_THINK_DELAY_MS
+  const isResolving = state.turnResolution.active
+  const resolvingMessage =
+    playbackStage === 'move'
+      ? 'Resolving move rolls...'
+      : playbackStage === 'claim'
+        ? 'Resolving claim rolls...'
+        : playbackStage === 'sabotage'
+          ? 'Resolving sabotage rolls...'
+          : playbackStage === 'post'
+            ? 'Applying post effects...'
+            : state.turnResolution.message
+
+  const clearResolutionTimers = useCallback(() => {
+    resolutionTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    resolutionTimersRef.current = []
+  }, [])
 
   useEffect(() => {
     setDraftAllocation(emptyAllocation())
   }, [state.currentPlayerIndex, state.started])
 
   useEffect(() => {
-    if (!state.started || state.winnerId || !currentPlayer?.isAI) {
+    if (typeof window === 'undefined' || !window.matchMedia) {
       return
     }
 
-    const timer = window.setTimeout(() => {
-      dispatch({ type: 'RESOLVE_TURN' })
-      dispatch({ type: 'NEXT_PLAYER' })
-    }, 1000)
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const update = () => setPrefersReducedMotion(media.matches)
+    update()
 
-    return () => window.clearTimeout(timer)
-  }, [state.started, state.winnerId, currentPlayer?.id, currentPlayer?.isAI])
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+
+  useEffect(() => {
+    return () => clearResolutionTimers()
+  }, [clearResolutionTimers])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -72,6 +103,11 @@ function App() {
     [state.players, state.winnerId],
   )
 
+  const winnerPlayer = useMemo(
+    () => state.players.find((player) => player.id === state.winnerId),
+    [state.players, state.winnerId],
+  )
+
   const currentRound = useMemo(() => {
     const playerCount = Math.max(state.players.length, 1)
     return Math.floor((state.turn - 1) / playerCount) + 1
@@ -88,6 +124,71 @@ function App() {
       }),
     [state.players, state.log, state.winnerId, state.winnerReason, state.turn],
   )
+
+  const startResolutionFlow = useCallback((allocation?: Allocation) => {
+    if (!state.started || state.winnerId || !currentPlayer || isResolving) {
+      return
+    }
+
+    const isSkippedTurn = currentPlayer.skippedTurns > 0
+
+    dispatch({
+      type: 'START_TURN_RESOLUTION',
+      payload: {
+        stage: 'resolving',
+        message: isSkippedTurn
+          ? `${currentPlayer.name} is resolving post effects...`
+          : `${currentPlayer.name} is resolving Move → Claim → Sabotage...`,
+      },
+    })
+
+    setPlaybackStage(isSkippedTurn ? 'post' : 'move')
+
+    if (allocation) {
+      dispatch({ type: 'ALLOCATE_DICE', payload: allocation })
+    }
+
+    dispatch({ type: 'RESOLVE_TURN' })
+
+    clearResolutionTimers()
+
+    if (!isSkippedTurn) {
+      resolutionTimersRef.current.push(
+        window.setTimeout(() => {
+          setPlaybackStage('claim')
+        }, resolveStageDelay),
+      )
+      resolutionTimersRef.current.push(
+        window.setTimeout(() => {
+          setPlaybackStage('sabotage')
+        }, resolveStageDelay * 2),
+      )
+      resolutionTimersRef.current.push(
+        window.setTimeout(() => {
+          setPlaybackStage('post')
+        }, resolveStageDelay * 3),
+      )
+    }
+
+    resolutionTimersRef.current.push(window.setTimeout(() => {
+      dispatch({ type: 'NEXT_PLAYER' })
+      dispatch({ type: 'END_TURN_RESOLUTION' })
+      setPlaybackStage('idle')
+      resolutionTimersRef.current = []
+    }, isSkippedTurn ? resolveStageDelay * 2 : resolveStageDelay * 4))
+  }, [state.started, state.winnerId, currentPlayer, isResolving, clearResolutionTimers, resolveStageDelay])
+
+  useEffect(() => {
+    if (!state.started || state.winnerId || !currentPlayer?.isAI || isResolving) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      startResolutionFlow()
+    }, aiThinkDelay)
+
+    return () => window.clearTimeout(timer)
+  }, [state.started, state.winnerId, currentPlayer?.id, currentPlayer?.isAI, isResolving, startResolutionFlow, aiThinkDelay])
 
   const handleStart = () => {
     if (mode === 'hotseat') {
@@ -127,13 +228,12 @@ function App() {
   }
 
   const handleEndTurn = () => {
-    if (!currentPlayer || currentPlayer.isAI) {
+    if (!currentPlayer || currentPlayer.isAI || isResolving) {
       return
     }
 
     if (currentPlayer.skippedTurns > 0) {
-      dispatch({ type: 'RESOLVE_TURN' })
-      dispatch({ type: 'NEXT_PLAYER' })
+      startResolutionFlow()
       return
     }
 
@@ -141,12 +241,35 @@ function App() {
       return
     }
 
-    dispatch({ type: 'ALLOCATE_DICE', payload: draftAllocation })
-    dispatch({ type: 'RESOLVE_TURN' })
-    dispatch({ type: 'NEXT_PLAYER' })
+    startResolutionFlow(draftAllocation)
+  }
+
+  const handleAllocatePreferred = () => {
+    if (!currentPlayer || currentPlayer.isAI || currentPlayer.skippedTurns > 0 || state.winnerId || isResolving) {
+      return
+    }
+
+    const preferred = currentPlayer.dicePool.reduce<Allocation>((next, die) => {
+      if (die.color === 'blue') {
+        next.move.push(die.id)
+        return next
+      }
+
+      if (die.color === 'green') {
+        next.claim.push(die.id)
+        return next
+      }
+
+      next.sabotage.push(die.id)
+      return next
+    }, emptyAllocation())
+
+    setDraftAllocation(preferred)
   }
 
   const handleNewGame = () => {
+    clearResolutionTimers()
+    setPlaybackStage('idle')
     setShowDebrief(false)
     dispatch({ type: 'NEW_GAME' })
   }
@@ -364,6 +487,19 @@ function App() {
               </button>
             </div>
 
+            {winnerPlayer && (
+              <p className="flex items-center gap-1.5 text-sm text-emerald-100">
+                <span>Winner MacGuffins:</span>
+                <img
+                  src={MACGUFFIN_TOKEN_ICON}
+                  alt=""
+                  aria-hidden="true"
+                  className="h-4 w-4 rounded object-cover"
+                />
+                <span className="font-semibold">{winnerPlayer.macGuffins}</span>
+              </p>
+            )}
+
             {showDebrief && (
               <div className="space-y-2 rounded-lg border border-emerald-500/40 bg-slate-950/40 p-3 text-sm text-emerald-50">
                 <p className="font-semibold text-emerald-200">Post-Game Debrief</p>
@@ -393,11 +529,16 @@ function App() {
             <div className="mt-2 grid gap-3 md:grid-cols-2">
               <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
                 <p className="font-semibold text-cyan-200">Turn Flow</p>
+                <img
+                  src="/assets/infographics/turn-flow-infographic.png"
+                  alt="Turn flow infographic: Allocate 6 dice, End Turn, Resolve Move then Claim then Sabotage"
+                  className="mt-2 w-full rounded border border-slate-700 object-cover"
+                />
                 <p className="mt-1">1) Allocate all 6 dice. 2) Press Resolve Turn. 3) Move, Claim, then Sabotage resolve using color affinity (+1 match, -1 off-color, min 1).</p>
               </div>
               <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
                 <p className="font-semibold text-cyan-200">Board Reading</p>
-                <p className="mt-1">? means unrevealed face. Claim checks only your landed planet. Faces 5 and 6 can award MacGuffins.</p>
+                <p className="mt-1">Unknown icon/? means unrevealed. Landing reveals that planet’s face and state (Barren, Event, or MacGuffin-rich). Claim dice only test your landed planet: rolls above face count as successes. Faces 5–6 are reward planets; Claimed means that reward was already harvested.</p>
               </div>
               <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
                 <p className="font-semibold text-cyan-200">Key Rules</p>
@@ -411,11 +552,16 @@ function App() {
           </section>
         )}
 
-        <GalaxyBoard
-          galaxy={state.galaxy}
-          players={state.players}
-          currentPlayerId={currentPlayer?.id}
-        />
+        <div className={isResolving ? 'pointer-events-none opacity-95' : ''}>
+          <GalaxyBoard
+            galaxy={state.galaxy}
+            players={state.players}
+            currentPlayerId={currentPlayer?.id}
+            resolving={isResolving}
+            playbackStage={playbackStage}
+            resolutionSummary={state.latestTurnResolution}
+          />
+        </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="space-y-4 lg:col-span-2">
@@ -423,8 +569,9 @@ function App() {
               <DicePool
                 dicePool={currentPlayer.dicePool}
                 allocation={draftAllocation}
-                disabled={currentPlayer.isAI}
+                disabled={currentPlayer.isAI || isResolving}
                 onAllocationChange={setDraftAllocation}
+                onAllocatePreferred={handleAllocatePreferred}
               />
             )}
             {currentPlayer && !state.winnerId && currentPlayer.skippedTurns > 0 && !currentPlayer.isAI && (
@@ -439,6 +586,8 @@ function App() {
               canSubmit={Boolean(currentPlayer?.skippedTurns && currentPlayer.skippedTurns > 0) || allDiceAllocated(draftAllocation)}
               disabled={Boolean(state.winnerId)}
               isAI={Boolean(currentPlayer?.isAI) && !state.winnerId}
+              resolving={isResolving}
+              resolvingLabel={resolvingMessage}
               onSubmit={handleEndTurn}
               onReset={() => setDraftAllocation(emptyAllocation())}
             />
@@ -446,9 +595,15 @@ function App() {
           <PlayerStatus players={state.players} currentPlayerId={currentPlayer?.id} />
         </div>
 
+        <TurnResolution
+          summary={state.latestTurnResolution}
+          resolving={isResolving}
+          playbackStage={playbackStage}
+        />
+
         <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
           <h2 className="mb-2 text-lg font-semibold text-slate-100">Turn Log</h2>
-          <p className="mb-2 text-xs text-slate-400">Read newest entries at top. Badges show round, turn, acting player, and event type.</p>
+          <p className="mb-2 text-xs text-slate-400">Read newest entries at top. Badges show round, turn, acting player, and event type. Each card is one resolved turn. Multiple lines in a card are outcomes from that same turn.</p>
           <TurnLog log={state.log} players={state.players} />
         </section>
 

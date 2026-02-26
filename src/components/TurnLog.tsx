@@ -146,7 +146,6 @@ export function TurnLog({ log, players }: TurnLogProps) {
 
   return (
     <div className="max-h-[55vh] space-y-3 overflow-y-auto pr-1 md:max-h-[62vh]">
-      <p className="text-xs text-slate-400">Each card is one resolved turn. Multiple lines in a card are outcomes from that same turn.</p>
       {grouped.map((group) => (
         <section key={`round-${group.round}`}>
           <p className="sticky top-0 z-10 mb-2 rounded bg-slate-900/95 px-2 py-1 text-xs font-semibold text-slate-300">

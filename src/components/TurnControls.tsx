@@ -2,12 +2,22 @@ interface TurnControlsProps {
   canSubmit: boolean
   disabled?: boolean
   isAI: boolean
+  resolving?: boolean
+  resolvingLabel?: string
   onSubmit: () => void
   onReset: () => void
 }
 
-export function TurnControls({ canSubmit, disabled, isAI, onSubmit, onReset }: TurnControlsProps) {
-  const turnLocked = disabled || !canSubmit || isAI
+export function TurnControls({
+  canSubmit,
+  disabled,
+  isAI,
+  resolving,
+  resolvingLabel,
+  onSubmit,
+  onReset,
+}: TurnControlsProps) {
+  const turnLocked = disabled || !canSubmit || isAI || resolving
 
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
@@ -25,18 +35,23 @@ export function TurnControls({ canSubmit, disabled, isAI, onSubmit, onReset }: T
         <button
           type="button"
           onClick={onReset}
-          disabled={disabled || isAI}
+          disabled={disabled || isAI || resolving}
           aria-label="Reset allocation"
           className="rounded-md border border-slate-600 px-4 py-2 font-semibold text-slate-200 disabled:cursor-not-allowed disabled:text-slate-500"
         >
           Reset Allocation
         </button>
       </div>
-      {!isAI && !canSubmit && !disabled && (
-        <p className="mt-3 text-xs text-slate-400">Resolve Turn is locked until all 6 dice are assigned.</p>
+      {resolving && (
+        <p className="mt-3 text-sm font-semibold text-cyan-200">
+          {resolvingLabel || 'Resolving turn activity...'}
+        </p>
       )}
       {!isAI && !disabled && (
-        <p className="mt-1 text-xs text-slate-400">Resolve Turn rolls all assigned dice, applies Move → Claim → Sabotage, then advances play. If your turn is skipped, just press Resolve Turn.</p>
+        <p className="mt-3 text-xs text-slate-400">
+          {!canSubmit ? 'Resolve Turn is locked until all 6 dice are assigned. ' : ''}
+          Resolve Turn rolls all assigned dice, applies Move → Claim → Sabotage, then advances play. If your turn is skipped, just press Resolve Turn.
+        </p>
       )}
       {isAI && !disabled && <p className="mt-3 text-sm text-cyan-200">AI is thinking...</p>}
     </div>
