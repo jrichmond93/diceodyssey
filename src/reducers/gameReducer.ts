@@ -182,6 +182,19 @@ const applyGalaxyShrink = (state: GameState): GameState => {
 
   const shrunk = state.galaxy.slice(0, Math.max(0, state.galaxy.length - SHRINK_COUNT))
   const maxPosition = shrunk.length
+  const clampedPlayersCount = state.players.filter((player) => player.shipPos > maxPosition).length
+
+  const galaxyAfterClampReveal =
+    clampedPlayersCount > 0 && maxPosition > 0
+      ? shrunk.map((planet, index) =>
+          index === maxPosition - 1
+            ? {
+                ...planet,
+                revealed: true,
+              }
+            : planet,
+        )
+      : shrunk
 
   const players = state.players.map((player) => ({
     ...player,
@@ -189,7 +202,7 @@ const applyGalaxyShrink = (state: GameState): GameState => {
   }))
 
   const withLog = addLog(
-    { ...state, galaxy: shrunk, players },
+    { ...state, galaxy: galaxyAfterClampReveal, players },
     `Galaxy collapse! ${Math.min(SHRINK_COUNT, state.galaxy.length)} planets were lost.`,
   )
 
