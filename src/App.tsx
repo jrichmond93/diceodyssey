@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
-import { Navigate, useLocation } from 'react-router-dom'
+import { Link, Navigate, useLocation } from 'react-router-dom'
 import { AppFooter } from './components/AppFooter'
 import { DicePool } from './components/DicePool'
 import { GalaxyBoard } from './components/GalaxyBoard'
@@ -192,7 +192,8 @@ function App() {
         return `${snapshot.playerName} skipped turn (sabotage effect).`
       }
 
-      const movedBy = Math.max(0, snapshot.position.after - snapshot.position.before)
+      const moveDelta = snapshot.position.after - snapshot.position.before
+      const movedBy = Math.abs(moveDelta)
       const appliedSkips = snapshot.skips.appliedToTarget?.amount ?? 0
       const targetName = snapshot.skips.appliedToTarget?.targetName
 
@@ -210,7 +211,14 @@ function App() {
             ? 'sabotage no impact'
             : 'sabotage none'
 
-      return `${snapshot.playerName}: move +${movedBy} (${snapshot.position.before}→${snapshot.position.after}), ${claimPart}, ${sabotagePart}.`
+      const movePart =
+        moveDelta > 0
+          ? `move forward ${movedBy}`
+          : moveDelta < 0
+            ? `move backward ${movedBy}`
+            : 'move no change'
+
+      return `${snapshot.playerName}: ${movePart} (${snapshot.position.before}→${snapshot.position.after}), ${claimPart}, ${sabotagePart}.`
     })
 
     return lines.join(' ')
@@ -440,15 +448,23 @@ function App() {
       <div className="flex min-h-screen flex-col">
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center p-6">
           <div className="rounded-2xl border border-slate-700 bg-slate-950/80 p-6">
-          <div className="flex items-center gap-3">
-            <img
-              src="/assets/branding/dice-odyssey-logo.png"
-              alt="Dice Odyssey logo"
-              className="h-20 w-20 rounded-md border border-slate-700 object-cover"
-            />
-            <div className="flex flex-col">
-              <h1 className="text-[2.1rem] font-bold text-cyan-200">Dice Odyssey</h1>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <img
+                src="/assets/branding/dice-odyssey-logo.png"
+                alt="Dice Odyssey logo"
+                className="h-20 w-20 rounded-md border border-slate-700 object-cover"
+              />
+              <div className="flex flex-col">
+                <h1 className="text-[2.1rem] font-bold text-cyan-200">Dice Odyssey</h1>
+              </div>
             </div>
+            <Link
+              to="/about"
+              className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
+            >
+              About
+            </Link>
           </div>
 
           <div className="relative mt-4">
@@ -702,7 +718,7 @@ function App() {
               </div>
               <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
                 <p className="font-semibold text-cyan-200">Board Reading</p>
-                <p className="mt-1">Unknown icon/? means unrevealed. Landing reveals that planet’s face and state (Barren, Event, or MacGuffin-rich). Claim dice only test your landed planet: rolls at or above face count as successes. Faces 4–6 can award MacGuffins; Claimed means that reward was already harvested.</p>
+                <p className="mt-1">Unknown icon/? means unrevealed. Landing reveals that planet’s face and state (Barren or MacGuffin-rich). Claim dice only test your landed planet: rolls at or above face count as successes. Face 3 awards +1, face 4 awards +2, face 5 awards +3, and face 6 awards +4 MacGuffins. Perfect Claim bonus: if all claim dice succeed, that planet reward is doubled (cap +8). Claimed means that reward was already harvested. If you start on the last planet and it is already claimed, Move sends you backward by your move total.</p>
               </div>
               <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
                 <p className="font-semibold text-cyan-200">Key Rules</p>

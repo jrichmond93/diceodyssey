@@ -36,7 +36,7 @@ export function GalaxyBoard({
     <div className="rounded-xl border border-slate-700 bg-slate-800/70 p-4">
       <div className="mb-3 flex flex-col gap-1 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
         <h2 className="text-lg font-semibold text-slate-100">Galaxy Board</h2>
-        <p className="text-xs text-slate-400 lg:max-w-4xl lg:text-right">Start is position 0. P# is the planet index. Chips show ships on that planet. Unknown/barren/event/macguffin icons show planet state. Faces 4/5/6 are reward planets. Claimed means rewards already harvested.</p>
+        <p className="text-xs text-slate-400 lg:max-w-4xl lg:text-right">Start is position 0. P# is the planet index. Chips show ships on that planet. Unknown/barren/macguffin icons show planet state. Faces 3/4/5/6 are reward planets. Perfect Claim doubles reward when all claim dice succeed (cap +8). Claimed means rewards already harvested.</p>
       </div>
       {resolving && playbackStage !== 'idle' && (
         <p className="mb-3 rounded border border-cyan-400/50 bg-cyan-900/20 px-2 py-1 text-xs text-cyan-100">

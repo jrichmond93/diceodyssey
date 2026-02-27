@@ -9,10 +9,14 @@ Players allocate 6 dice each turn across Move, Claim, and Sabotage to race for M
 - Color affinity applies to rolls:
 	- Matching slot color: `+1`
 	- Off-color slot: `-1` (minimum die value remains `1`)
+- Move is capped at galaxy end, but if you start a turn on the last planet and it is already claimed, your move goes backward by your move total.
 - Claim checks are successful when roll is `>=` planet face.
 - MacGuffin rewards are weighted by face:
-	- Face `4` or `5`: +`1` MacGuffin
-	- Face `6`: +`2` MacGuffins
+	- Face `3`: +`1` MacGuffin
+	- Face `4`: +`2` MacGuffins
+	- Face `5`: +`3` MacGuffins
+	- Face `6`: +`4` MacGuffins
+- Perfect Claim bonus: if all assigned claim dice succeed on that landed planet, the reward is doubled (cap `+8` MacGuffins from that claim).
 - Sabotage targets the nearest rival within range and can add skipped turns.
 - Win conditions:
 	- Reach `5` MacGuffins (race victory), or

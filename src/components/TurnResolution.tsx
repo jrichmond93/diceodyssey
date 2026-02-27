@@ -74,7 +74,8 @@ const buildNarrative = (summary: TurnResolutionSnapshot) => {
   const appliedSkips = summary.skips.appliedToTarget?.amount ?? 0
   const sabotageBlocked = Boolean(summary.skips.appliedToTarget?.blockedByImmunity)
   const collapseCount = Math.max(0, summary.galaxy.before - summary.galaxy.after)
-  const movedBy = Math.max(0, summary.position.after - summary.position.before)
+  const moveDelta = summary.position.after - summary.position.before
+  const movedBy = Math.abs(moveDelta)
 
   let tone: 'good' | 'neutral' | 'bad' = 'neutral'
   let headline = 'Steady turn.'
@@ -95,7 +96,13 @@ const buildNarrative = (summary: TurnResolutionSnapshot) => {
   if (summary.skipped) {
     sentences.push(`${summary.playerName} lost this turn to skip effects and could not roll or act.`)
   } else {
-    sentences.push(`${summary.playerName} moved ${movedBy} space${movedBy === 1 ? '' : 's'} (${summary.position.before} to ${summary.position.after}) with move total ${summary.totals.move}.`)
+    const movementDescriptor =
+      moveDelta > 0
+        ? `moved forward ${movedBy} space${movedBy === 1 ? '' : 's'}`
+        : moveDelta < 0
+          ? `moved backward ${movedBy} space${movedBy === 1 ? '' : 's'}`
+          : 'did not move'
+    sentences.push(`${summary.playerName} ${movementDescriptor} (${summary.position.before} to ${summary.position.after}) with move total ${summary.totals.move}.`)
 
     if (summary.claim.landedPlanetId) {
       if (summary.totals.gainedMacGuffins > 0) {
@@ -236,8 +243,9 @@ export function TurnResolution({ summary, humanSummary, resolving, playbackStage
             <p className="mt-1 text-xs text-slate-300">After pressing Resolve Turn, read these outcomes in order.</p>
             <div className="mt-2 space-y-1.5">
               {(() => {
-                const movedBy = Math.max(0, summary.position.after - summary.position.before)
-                const moveTone: 'good' | 'neutral' | 'bad' = movedBy > 0 ? 'good' : 'neutral'
+                const moveDelta = summary.position.after - summary.position.before
+                const movedBy = Math.abs(moveDelta)
+                const moveTone: 'good' | 'neutral' | 'bad' = moveDelta > 0 ? 'good' : 'neutral'
 
                 const claimTone: 'good' | 'neutral' | 'bad' =
                   summary.totals.gainedMacGuffins > 0
@@ -271,7 +279,12 @@ export function TurnResolution({ summary, humanSummary, resolving, playbackStage
                   {
                     label: 'Move',
                     tone: moveTone,
-                    message: `+${movedBy} spaces (${summary.position.before} → ${summary.position.after})`,
+                    message:
+                      moveDelta > 0
+                        ? `Forward ${movedBy} space${movedBy === 1 ? '' : 's'} (${summary.position.before} → ${summary.position.after})`
+                        : moveDelta < 0
+                          ? `Backward ${movedBy} space${movedBy === 1 ? '' : 's'} (${summary.position.before} → ${summary.position.after})`
+                          : `No movement (${summary.position.before} → ${summary.position.after})`,
                   },
                   {
                     label: 'Claim',

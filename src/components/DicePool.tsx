@@ -235,7 +235,7 @@ export function DicePool({
       </div>
 
       <div className="text-xs text-slate-400">
-        <p>Any die can go in any slot. Color affinity applies on roll results. Matching color to slot gets +1; off-color gets -1 (minimum 1). Move advances your ship (capped at galaxy end). Claim checks your landed planet. Sabotage targets nearest rival within 2 spaces; defense reduces skips, max stack is 3.</p>
+        <p>Any die can go in any slot. Color affinity applies on roll results. Matching color to slot gets +1; off-color gets -1 (minimum 1). Move usually advances your ship (capped at galaxy end), but if you start on the last planet and it is already claimed, move sends you backward. Claim checks your landed planet. Sabotage targets nearest rival within 2 spaces; defense reduces skips, max stack is 3.</p>
       </div>
     </div>
   )

@@ -22,10 +22,12 @@ const SHRINK_COUNT = 2
 const WINNING_MACGUFFINS = 5
 const SABOTAGE_RANGE = 2
 const MAX_SKIPPED_TURNS = 3
+const MAX_MACGUFFINS_PER_CLAIM = 8
 const MACGUFFIN_REWARD_BY_FACE: Record<number, number> = {
-  4: 1,
-  5: 1,
-  6: 2,
+  3: 1,
+  4: 2,
+  5: 3,
+  6: 4,
 }
 
 const ACTION_AFFINITY_COLOR: Record<ActionType, Color> = {
@@ -286,25 +288,25 @@ export const computeAIAllocation = (
     .slice(0, 4).length
 
   const priorities: Record<ActionType, number> = {
-    move: 3,
-    claim: 2.5,
+    move: 2.8,
+    claim: 3.2,
     sabotage: 1,
   }
 
   if (player.macGuffins < 3) {
-    priorities.move += 0.5
+    priorities.move += 0.3
   }
 
   if (nearestRivalDist <= 2) {
-    priorities.sabotage += 2
+    priorities.sabotage += 1.5
   }
 
   if (turn >= 6 || galaxy.length <= 9 || unclaimedAhead > 0) {
-    priorities.claim += 1.5
+    priorities.claim += 2
   }
 
   if (player.macGuffins >= 2) {
-    priorities.claim += 0.5
+    priorities.claim += 0.8
   }
 
   const dieIdsByColor = parseDieIdsByColor(player)
@@ -469,12 +471,18 @@ const resolveCurrentPlayerTurn = (state: GameState): GameState => {
   const sabotageTotal = sabotageRolls.reduce((sum, roll) => sum + roll.final, 0)
 
   const maxPosition = state.galaxy.length
-  const movedTo = Math.min(maxPosition, currentPlayer.shipPos + moveTotal)
+  const lastPlanet = maxPosition > 0 ? state.galaxy[maxPosition - 1] : undefined
+  const shouldMoveBackward =
+    maxPosition > 0 && currentPlayer.shipPos === maxPosition && Boolean(lastPlanet?.claimed)
+  const movedTo = shouldMoveBackward
+    ? Math.max(0, currentPlayer.shipPos - moveTotal)
+    : Math.min(maxPosition, currentPlayer.shipPos + moveTotal)
 
   const landedPlanetIndex = movedTo - 1
   const nextGalaxy = [...state.galaxy]
   let gainedMacGuffins = 0
   let claimSuccesses = 0
+  let perfectClaimBonusApplied = false
   let landedPlanetId: number | undefined
   let landedPlanetFace: number | undefined
 
@@ -490,7 +498,15 @@ const resolveCurrentPlayerTurn = (state: GameState): GameState => {
     if (!landedPlanet.claimed && claimTotal.length > 0) {
       claimSuccesses = claimTotal.filter((roll) => roll.final >= landedPlanet.face).length
       if (claimSuccesses > 0) {
-        gainedMacGuffins = getMacGuffinRewardForFace(landedPlanet.face)
+        const baseMacGuffinReward = getMacGuffinRewardForFace(landedPlanet.face)
+        const isPerfectClaim = claimSuccesses === claimTotal.length
+
+        if (baseMacGuffinReward > 0) {
+          perfectClaimBonusApplied = isPerfectClaim
+          gainedMacGuffins = isPerfectClaim
+            ? Math.min(baseMacGuffinReward * 2, MAX_MACGUFFINS_PER_CLAIM)
+            : baseMacGuffinReward
+        }
 
         if (gainedMacGuffins > 0) {
           nextGalaxy[landedPlanetIndex] = {
@@ -566,7 +582,12 @@ const resolveCurrentPlayerTurn = (state: GameState): GameState => {
     index === state.currentPlayerIndex ? { ...player, allocation: undefined } : player,
   )
 
-  const summary = `${currentPlayer.name}: move [${moveRolls.map((roll) => roll.final).join(', ') || '-'}] (${moveTotal}), claim [${claimRolls.map((roll) => roll.final).join(', ') || '-'}], sabotage [${sabotageRolls.map((roll) => roll.final).join(', ') || '-'}] (${sabotageTotal}), +${gainedMacGuffins} MacGuffins.`
+  const perfectClaimSummary =
+    perfectClaimBonusApplied && gainedMacGuffins > 0
+      ? ` Perfect Claim bonus applied (reward doubled, cap ${MAX_MACGUFFINS_PER_CLAIM}).`
+      : ''
+
+  const summary = `${currentPlayer.name}: move [${moveRolls.map((roll) => roll.final).join(', ') || '-'}] (${moveTotal}), claim [${claimRolls.map((roll) => roll.final).join(', ') || '-'}], sabotage [${sabotageRolls.map((roll) => roll.final).join(', ') || '-'}] (${sabotageTotal}), +${gainedMacGuffins} MacGuffins.${perfectClaimSummary}`
 
   const withResolvedTurn = addLog(
     {
@@ -620,6 +641,9 @@ const resolveCurrentPlayerTurn = (state: GameState): GameState => {
     notes: [
       'Affinity applied to every die: +1 on matching color/action, -1 otherwise (minimum 1).',
       'Players are immune to new skip-turn sabotage until their next playable turn after being skipped.',
+      ...(perfectClaimBonusApplied
+        ? [`Perfect Claim bonus: all claim dice succeeded; reward doubled (capped at ${MAX_MACGUFFINS_PER_CLAIM}).`]
+        : []),
     ],
   }
 
