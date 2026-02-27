@@ -127,6 +127,52 @@ export function AboutPage() {
         />
       </section>
 
+      <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
+        <h2 className="text-lg font-semibold text-slate-100">Action Icons</h2>
+        <p className="mt-1 text-sm text-slate-300">These are the same action markers used in the in-game dice allocation panel.</p>
+        <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <article className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+            <div className="flex items-center gap-3">
+              <img
+                src="/assets/ui/icon-action-move.png"
+                alt="Move action icon"
+                className="h-12 w-12 rounded border border-slate-700 object-cover"
+              />
+              <div>
+                <h3 className="text-sm font-semibold text-blue-300">Move</h3>
+                <p className="mt-1 text-sm text-slate-300">Advance by your move roll total (capped at galaxy end).</p>
+              </div>
+            </div>
+          </article>
+          <article className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+            <div className="flex items-center gap-3">
+              <img
+                src="/assets/ui/icon-action-claim.png"
+                alt="Claim action icon"
+                className="h-12 w-12 rounded border border-slate-700 object-cover"
+              />
+              <div>
+                <h3 className="text-sm font-semibold text-emerald-300">Claim</h3>
+                <p className="mt-1 text-sm text-slate-300">Roll above the landed planet face to gain MacGuffins.</p>
+              </div>
+            </div>
+          </article>
+          <article className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+            <div className="flex items-center gap-3">
+              <img
+                src="/assets/ui/icon-action-sabotage.png"
+                alt="Sabotage action icon"
+                className="h-12 w-12 rounded border border-slate-700 object-cover"
+              />
+              <div>
+                <h3 className="text-sm font-semibold text-red-300">Sabotage</h3>
+                <p className="mt-1 text-sm text-slate-300">Pressure the nearest rival in range and apply skip turns after defense.</p>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {sections.map((section) => (
           <article key={section.title} className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">

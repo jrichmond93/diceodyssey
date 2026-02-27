@@ -30,6 +30,7 @@ export function GalaxyBoard({
     resolutionSummary &&
     resolutionSummary.galaxy.after < resolutionSummary.galaxy.before
   const collapseEdgePlanetId = postCollapse ? resolutionSummary?.galaxy.after : undefined
+  const onStart = players.filter((player) => player.shipPos === 0)
 
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
@@ -44,12 +45,34 @@ export function GalaxyBoard({
         </p>
       )}
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
-        <div className={`flex min-h-20 items-center justify-center rounded-lg border bg-slate-900 px-2 py-2 text-sm sm:py-3 ${
+        <div className={`relative min-h-24 rounded-lg border bg-slate-900 px-2 py-2 text-sm sm:py-3 ${
           moveFromPos === 0 || moveToPos === 0
             ? 'border-cyan-300 text-cyan-100 ring-1 ring-cyan-300/60'
             : 'border-slate-700 text-slate-300'
         }`}>
-          Start
+          <span className="absolute left-1 top-1 rounded border border-cyan-400/40 bg-cyan-900/20 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-cyan-100">
+            Origin
+          </span>
+          <div className="mt-4 flex flex-col items-center gap-0.5">
+            <span className="text-xl leading-none" aria-hidden="true">🚀</span>
+            <p className="text-[11px] font-semibold tracking-wide text-cyan-200">Launch</p>
+          </div>
+          <div className="mt-1 flex flex-wrap justify-center gap-1">
+            {onStart.map((player) => (
+              <span
+                key={player.id}
+                className={`rounded px-1 py-0.5 text-[9px] font-semibold sm:px-1.5 sm:text-[10px] ${
+                  sabotageTargetId === player.id
+                    ? 'animate-pulse bg-red-500 text-red-50'
+                    : activeActorId === player.id || currentPlayerId === player.id
+                      ? 'bg-cyan-400 text-slate-900'
+                      : 'bg-slate-700 text-slate-100'
+                }`}
+              >
+                {player.name.slice(0, 5)}
+              </span>
+            ))}
+          </div>
         </div>
         {galaxy.map((planet, index) => {
           const pos = index + 1
@@ -75,12 +98,12 @@ export function GalaxyBoard({
               key={planet.id}
               className={`relative min-h-20 rounded-lg border bg-slate-900 px-1.5 py-2 text-center transition-colors sm:px-2 sm:py-3 ${planetHighlightClass}`}
             >
-              <p className="text-[10px] text-slate-400 sm:text-xs">P{planet.id}</p>
+              <p className="absolute left-1 top-1 text-[10px] text-slate-400 sm:text-xs">P{planet.id}</p>
               <img
                 src={planetStateIcon[planetState]}
                 alt=""
                 aria-hidden="true"
-                className="mx-auto h-7 w-7 rounded object-cover"
+                className="mx-auto h-10 w-10 rounded object-cover"
               />
               <p className="text-base font-bold text-cyan-200 sm:text-lg">
                 {planet.revealed ? planet.face : '?'}

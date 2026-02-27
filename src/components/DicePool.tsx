@@ -38,6 +38,7 @@ const actionLabelColorClass: Record<ActionType, string> = {
 const actionIcon: Partial<Record<ActionType, string>> = {
   move: '/assets/ui/icon-action-move.png',
   claim: '/assets/ui/icon-action-claim.png',
+  sabotage: '/assets/ui/icon-action-sabotage.png',
 }
 
 const dieImageByColor: Record<Die['color'], string> = {

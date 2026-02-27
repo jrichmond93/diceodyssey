@@ -110,6 +110,14 @@ function App() {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
   }, [state.started])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }, [location.pathname])
+
   const winnerName = useMemo(
     () => state.players.find((player) => player.id === state.winnerId)?.name,
     [state.players, state.winnerId],
