@@ -1,8 +1,10 @@
 import type { DebugDieRoll, TurnResolutionPlaybackStage, TurnResolutionSnapshot } from '../types'
 import { getPlanetState, planetStateLabel } from '../utils/planetState'
+import { getDieColorFallbackAssetPath, getDieFaceAssetPath } from '../utils/dieAssets'
 
 interface TurnResolutionProps {
   summary?: TurnResolutionSnapshot
+  humanSummary?: TurnResolutionSnapshot
   resolving: boolean
   playbackStage: TurnResolutionPlaybackStage
 }
@@ -142,21 +144,46 @@ const renderRolls = (rolls: DebugDieRoll[]) => {
 
   return (
     <div className="mt-1 flex flex-wrap gap-1">
-      {rolls.map((roll) => (
-        <span
-          key={`${roll.dieId}-${roll.raw}-${roll.final}`}
-          className={`rounded border px-1.5 py-0.5 text-[11px] font-semibold ${colorChipClass[roll.color]}`}
-        >
-          {roll.color[0].toUpperCase()} {roll.raw}{roll.modifier === 0 ? '' : roll.modifier > 0 ? `+${roll.modifier}` : `${roll.modifier}`}={roll.final}
-        </span>
-      ))}
+      {rolls.map((roll) => {
+        const dieFaceAssetPath = getDieFaceAssetPath(roll.color, roll.raw)
+        const fallbackPath = getDieColorFallbackAssetPath(roll.color)
+
+        return (
+          <span
+            key={`${roll.dieId}-${roll.raw}-${roll.final}`}
+            className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-semibold ${colorChipClass[roll.color]}`}
+          >
+            <img
+              src={dieFaceAssetPath ?? fallbackPath}
+              alt={`${roll.color} die showing ${roll.raw}`}
+              className="h-5 w-5 rounded object-cover"
+              loading="lazy"
+              onError={(event) => {
+                const target = event.currentTarget
+                if (target.src.endsWith(fallbackPath)) {
+                  return
+                }
+
+                target.src = fallbackPath
+              }}
+            />
+            <span>
+              {roll.raw}{roll.modifier === 0 ? '' : roll.modifier > 0 ? `+${roll.modifier}` : `${roll.modifier}`}={roll.final}
+            </span>
+          </span>
+        )
+      })}
     </div>
   )
 }
 
-export function TurnResolution({ summary, resolving, playbackStage }: TurnResolutionProps) {
+export function TurnResolution({ summary, humanSummary, resolving, playbackStage }: TurnResolutionProps) {
   const activeStageIndex = playbackStage === 'idle' ? -1 : stageIndex[playbackStage]
   const narrative = summary ? buildNarrative(summary) : null
+  const humanNarrative = humanSummary ? buildNarrative(humanSummary) : null
+  const showHumanNarrative =
+    Boolean(humanSummary) &&
+    (!summary || summary.playerId !== humanSummary?.playerId || summary.turn !== humanSummary?.turn)
   const claimPlanetState =
     summary?.claim.landedPlanetFace !== undefined
       ? getPlanetState({ revealed: true, face: summary.claim.landedPlanetFace })
@@ -203,8 +230,8 @@ export function TurnResolution({ summary, resolving, playbackStage }: TurnResolu
       )}
 
       {summary && (
-        <div className="mt-3 space-y-2 text-sm text-slate-200">
-          <div className="rounded border border-slate-700 bg-slate-900/50 p-2">
+        <div className="mt-3 space-y-2 text-sm text-slate-200 xl:space-y-0 xl:grid xl:grid-cols-12 xl:gap-2">
+          <div className="rounded border border-slate-700 bg-slate-900/50 p-2 xl:col-span-6">
             <p className="text-xs font-semibold uppercase tracking-wide text-cyan-200">What happened</p>
             <p className="mt-1 text-xs text-slate-300">After pressing Resolve Turn, read these outcomes in order.</p>
             <div className="mt-2 space-y-1.5">
@@ -280,19 +307,28 @@ export function TurnResolution({ summary, resolving, playbackStage }: TurnResolu
           </div>
 
           {narrative && (
-            <div className={`rounded border p-2 ${getNarrativeToneClass(narrative.tone)}`}>
+            <div className={`rounded border p-2 ${getNarrativeToneClass(narrative.tone)} xl:col-span-6`}>
               <p className="text-sm font-semibold">{narrative.headline}</p>
               <p className="mt-1 text-xs leading-relaxed">{narrative.summary}</p>
             </div>
           )}
 
+          {showHumanNarrative && humanNarrative && humanSummary && (
+            <div className={`rounded border p-2 ${getNarrativeToneClass(humanNarrative.tone)} xl:col-span-6`}>
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-200">Your latest turn</p>
+              <p className="mt-1 text-sm font-semibold">{humanNarrative.headline}</p>
+              <p className="mt-1 text-xs leading-relaxed">{humanNarrative.summary}</p>
+              <p className="mt-1 text-[11px] text-slate-300">R{humanSummary.round} · T{humanSummary.turn} · {humanSummary.playerName}</p>
+            </div>
+          )}
+
           {summary.skipped && (
-            <p className="rounded border border-amber-400/60 bg-amber-900/20 px-2 py-1 text-amber-100">
+            <p className="rounded border border-amber-400/60 bg-amber-900/20 px-2 py-1 text-amber-100 xl:col-span-6">
               Turn skipped due to sabotage effect.
             </p>
           )}
 
-          <div className="rounded border border-slate-700 bg-slate-900/50 p-2">
+          <div className="rounded border border-slate-700 bg-slate-900/50 p-2 xl:col-span-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-cyan-200">Move</p>
             {renderRolls(summary.rolls.move)}
             <p className="mt-1 text-xs text-slate-300">
@@ -300,7 +336,7 @@ export function TurnResolution({ summary, resolving, playbackStage }: TurnResolu
             </p>
           </div>
 
-          <div className="rounded border border-slate-700 bg-slate-900/50 p-2">
+          <div className="rounded border border-slate-700 bg-slate-900/50 p-2 xl:col-span-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-emerald-200">Claim</p>
             {renderRolls(summary.rolls.claim)}
             <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-300">
@@ -322,13 +358,13 @@ export function TurnResolution({ summary, resolving, playbackStage }: TurnResolu
             </div>
           </div>
 
-          <div className="rounded border border-slate-700 bg-slate-900/50 p-2">
+          <div className="rounded border border-slate-700 bg-slate-900/50 p-2 xl:col-span-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-red-200">Sabotage</p>
             {renderRolls(summary.rolls.sabotage)}
             <p className="mt-1 text-xs text-slate-300">Total {summary.totals.sabotage} · {summary.sabotageMessage}</p>
           </div>
 
-          <div className="rounded border border-slate-700 bg-slate-900/50 p-2">
+          <div className="rounded border border-slate-700 bg-slate-900/50 p-2 xl:col-span-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-violet-200">Post Effects</p>
             <p className="mt-1 text-xs text-slate-300">
               Galaxy {summary.galaxy.before} → {summary.galaxy.after}

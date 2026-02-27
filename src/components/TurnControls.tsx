@@ -21,26 +21,28 @@ export function TurnControls({
 
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
-      <h2 className="mb-3 text-lg font-semibold text-slate-100">Turn Controls</h2>
-      <div className="flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={onSubmit}
-          disabled={turnLocked}
-          aria-label="Resolve turn"
-          className="rounded-md bg-cyan-500 px-4 py-2 font-semibold text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-300"
-        >
-          Resolve Turn (Move → Claim → Sabotage)
-        </button>
-        <button
-          type="button"
-          onClick={onReset}
-          disabled={disabled || isAI || resolving}
-          aria-label="Reset allocation"
-          className="rounded-md border border-slate-600 px-4 py-2 font-semibold text-slate-200 disabled:cursor-not-allowed disabled:text-slate-500"
-        >
-          Reset Allocation
-        </button>
+      <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+        <h2 className="text-lg font-semibold text-slate-100">Turn Controls</h2>
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={turnLocked}
+            aria-label="Resolve turn"
+            className="rounded-md bg-cyan-500 px-4 py-2 font-semibold text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-300"
+          >
+            Resolve Turn (Move → Claim → Sabotage)
+          </button>
+          <button
+            type="button"
+            onClick={onReset}
+            disabled={disabled || isAI || resolving}
+            aria-label="Reset allocation"
+            className="rounded-md border border-slate-600 px-4 py-2 font-semibold text-slate-200 disabled:cursor-not-allowed disabled:text-slate-500"
+          >
+            Reset Allocation
+          </button>
+        </div>
       </div>
       {resolving && (
         <p className="mt-3 text-sm font-semibold text-cyan-200">

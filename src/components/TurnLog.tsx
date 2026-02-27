@@ -1,4 +1,6 @@
 import type { Player, TurnEvent } from '../types'
+import type { Color } from '../types'
+import { getDieColorFallbackAssetPath, getDieFaceAssetPath } from '../utils/dieAssets'
 
 interface TurnLogProps {
   log: TurnEvent[]
@@ -132,6 +134,43 @@ const groupByRound = (entries: RenderLogEntry[]): Array<{ round: number; entries
   return groups
 }
 
+interface ActionRollStrip {
+  move: number[]
+  claim: number[]
+  sabotage: number[]
+}
+
+const parseRollValues = (value: string): number[] => {
+  if (!value || value.trim() === '-') {
+    return []
+  }
+
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item))
+}
+
+const parseActionRollStrip = (message: string): ActionRollStrip | null => {
+  const match = message.match(/move \[([^\]]*)\].*claim \[([^\]]*)\].*sabotage \[([^\]]*)\]/i)
+  if (!match) {
+    return null
+  }
+
+  return {
+    move: parseRollValues(match[1]),
+    claim: parseRollValues(match[2]),
+    sabotage: parseRollValues(match[3]),
+  }
+}
+
+const actionRollMeta: Record<keyof ActionRollStrip, { label: string; color: Color; textClass: string }> = {
+  move: { label: 'Move', color: 'blue', textClass: 'text-blue-200' },
+  claim: { label: 'Claim', color: 'green', textClass: 'text-emerald-200' },
+  sabotage: { label: 'Sabotage', color: 'red', textClass: 'text-red-200' },
+}
+
 export function TurnLog({ log, players }: TurnLogProps) {
   const playerStyles = new Map<string, { accent: string; badge: string }>()
   players.forEach((player, index) => {
@@ -155,6 +194,8 @@ export function TurnLog({ log, players }: TurnLogProps) {
             {group.entries.map((entry) => {
               const style = entry.playerId ? playerStyles.get(entry.playerId) : null
               const kindLabel = entry.kinds.size === 1 ? [...entry.kinds][0] : 'turn'
+              const actionRollMessage = entry.messages.find((message) => /move \[[^\]]*\]/i.test(message))
+              const actionRollStrip = actionRollMessage ? parseActionRollStrip(actionRollMessage) : null
 
               return (
                 <li
@@ -181,6 +222,46 @@ export function TurnLog({ log, players }: TurnLogProps) {
                       {kindLabel}
                     </span>
                   </div>
+                  {actionRollStrip && (
+                    <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px]">
+                      {(Object.keys(actionRollStrip) as Array<keyof ActionRollStrip>).map((action) => {
+                        const values = actionRollStrip[action]
+                        const meta = actionRollMeta[action]
+
+                        return (
+                          <div key={`${entry.id}-${action}`} className="flex items-center gap-1">
+                            <span className={`font-semibold uppercase tracking-wide ${meta.textClass}`}>{meta.label}</span>
+                            {values.length === 0 ? (
+                              <span className="text-slate-400">-</span>
+                            ) : (
+                              values.map((value, index) => {
+                                const faceAssetPath = getDieFaceAssetPath(meta.color, value)
+                                const fallbackAssetPath = getDieColorFallbackAssetPath(meta.color)
+
+                                return (
+                                  <img
+                                    key={`${entry.id}-${action}-${index}-${value}`}
+                                    src={faceAssetPath ?? fallbackAssetPath}
+                                    alt={`${meta.label} die showing ${value}`}
+                                    className="h-4 w-4 rounded object-cover"
+                                    loading="lazy"
+                                    onError={(event) => {
+                                      const target = event.currentTarget
+                                      if (target.src.endsWith(fallbackAssetPath)) {
+                                        return
+                                      }
+
+                                      target.src = fallbackAssetPath
+                                    }}
+                                  />
+                                )
+                              })
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                   <div className="space-y-1">
                     {entry.messages.map((message, index) => (
                       <p key={`${entry.id}-line-${index}`}>

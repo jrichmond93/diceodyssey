@@ -9,7 +9,7 @@ const sections = [
   },
   {
     title: 'Actions Explained',
-    body: 'Move: advances your ship by the move roll total (capped by galaxy size). Claim: only checks the planet you land on. Rolls above planet face are successes. Sabotage: targets nearest rival within range 2 and can force skip turns.',
+    body: 'Move: advances your ship by the move roll total (capped by galaxy size). Claim: only checks the planet you land on. Rolls at or above planet face are successes. Sabotage: targets nearest rival within range 2 and can force skip turns.',
   },
   {
     title: 'Defense and Skips',
@@ -17,7 +17,7 @@ const sections = [
   },
   {
     title: 'Planets and Rewards',
-    body: 'Landing reveals a planet. Face 5 yields 1 MacGuffin and face 6 yields 2 when successfully claimed. Claimed planets no longer provide reward.',
+    body: 'Landing reveals a planet. Faces 4-5 yield 1 MacGuffin and face 6 yields 2 when successfully claimed. Claimed planets no longer provide reward.',
   },
   {
     title: 'Galaxy Collapse and Winning',

@@ -122,9 +122,11 @@ export interface GameState {
   winnerReason?: 'race' | 'survival'
   log: TurnEvent[]
   debugEnabled: boolean
+  animationEnabled: boolean
   debugLog: DebugTurnRecord[]
   turnResolution: TurnResolutionState
   latestTurnResolution?: TurnResolutionSnapshot
+  turnResolutionHistory: TurnResolutionSnapshot[]
 }
 
 export interface InitGamePayload {
@@ -133,6 +135,7 @@ export interface InitGamePayload {
   aiCount: number
   difficulty: Difficulty
   debugEnabled: boolean
+  animationEnabled: boolean
 }
 
 export type GameAction =

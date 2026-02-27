@@ -22,12 +22,19 @@ const SHRINK_COUNT = 2
 const WINNING_MACGUFFINS = 5
 const SABOTAGE_RANGE = 2
 const MAX_SKIPPED_TURNS = 3
+const MACGUFFIN_REWARD_BY_FACE: Record<number, number> = {
+  4: 1,
+  5: 1,
+  6: 2,
+}
 
 const ACTION_AFFINITY_COLOR: Record<ActionType, Color> = {
   move: 'blue',
   claim: 'green',
   sabotage: 'red',
 }
+
+const getMacGuffinRewardForFace = (face: number): number => MACGUFFIN_REWARD_BY_FACE[face] ?? 0
 
 const idleTurnResolution = (): TurnResolutionState => ({
   active: false,
@@ -53,9 +60,11 @@ const initialState: GameState = {
   winnerReason: undefined,
   log: [],
   debugEnabled: false,
+  animationEnabled: false,
   debugLog: [],
   turnResolution: idleTurnResolution(),
   latestTurnResolution: undefined,
+  turnResolutionHistory: [],
 }
 
 const appendDebugRecord = (state: GameState, record: DebugTurnRecord): GameState => {
@@ -265,20 +274,24 @@ export const computeAIAllocation = (
 
   const priorities: Record<ActionType, number> = {
     move: 3,
-    claim: 2,
+    claim: 2.5,
     sabotage: 1,
   }
 
   if (player.macGuffins < 3) {
-    priorities.move += 1
+    priorities.move += 0.5
   }
 
   if (nearestRivalDist <= 2) {
     priorities.sabotage += 2
   }
 
-  if (turn >= 8 || galaxy.length <= 8 || unclaimedAhead > 1) {
-    priorities.claim += 1
+  if (turn >= 6 || galaxy.length <= 9 || unclaimedAhead > 0) {
+    priorities.claim += 1.5
+  }
+
+  if (player.macGuffins >= 2) {
+    priorities.claim += 0.5
   }
 
   const dieIdsByColor = parseDieIdsByColor(player)
@@ -417,6 +430,7 @@ const resolveCurrentPlayerTurn = (state: GameState): GameState => {
     return {
       ...withDebug,
       latestTurnResolution: snapshot,
+      turnResolutionHistory: [snapshot, ...withDebug.turnResolutionHistory].slice(0, 20),
     }
   }
 
@@ -445,7 +459,7 @@ const resolveCurrentPlayerTurn = (state: GameState): GameState => {
   const movedTo = Math.min(maxPosition, currentPlayer.shipPos + moveTotal)
 
   const landedPlanetIndex = movedTo - 1
-  let nextGalaxy = [...state.galaxy]
+  const nextGalaxy = [...state.galaxy]
   let gainedMacGuffins = 0
   let claimSuccesses = 0
   let landedPlanetId: number | undefined
@@ -461,9 +475,9 @@ const resolveCurrentPlayerTurn = (state: GameState): GameState => {
     }
 
     if (!landedPlanet.claimed && claimTotal.length > 0) {
-      claimSuccesses = claimTotal.filter((roll) => roll.final > landedPlanet.face).length
+      claimSuccesses = claimTotal.filter((roll) => roll.final >= landedPlanet.face).length
       if (claimSuccesses > 0) {
-        gainedMacGuffins = landedPlanet.face === 6 ? 2 : landedPlanet.face === 5 ? 1 : 0
+        gainedMacGuffins = getMacGuffinRewardForFace(landedPlanet.face)
 
         if (gainedMacGuffins > 0) {
           nextGalaxy[landedPlanetIndex] = {
@@ -610,6 +624,7 @@ const resolveCurrentPlayerTurn = (state: GameState): GameState => {
   return {
     ...withDebug,
     latestTurnResolution: snapshot,
+    turnResolutionHistory: [snapshot, ...withDebug.turnResolutionHistory].slice(0, 20),
   }
 }
 
@@ -627,8 +642,10 @@ export const gameReducer = (state: GameState = initialState, action: GameAction)
         galaxy,
         difficulty: action.payload.difficulty,
         debugEnabled: action.payload.debugEnabled,
+        animationEnabled: action.payload.animationEnabled,
         debugLog: [],
         latestTurnResolution: undefined,
+        turnResolutionHistory: [],
         log: [
           {
             id: crypto.randomUUID(),

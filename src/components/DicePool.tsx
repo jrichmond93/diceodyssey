@@ -106,12 +106,14 @@ const DropZone = ({
   onDropDie,
   children,
   disabled,
+  inlineChildrenOnWide,
 }: {
   title: string
   action?: ActionType
   onDropDie: (dieId: string) => void
   children: ReactNode
   disabled?: boolean
+  inlineChildrenOnWide?: boolean
 }) => {
   const [{ canDrop, isOver }, dropRef] = useDrop(() => ({
     accept: DND_TYPE,
@@ -141,10 +143,12 @@ const DropZone = ({
       }`}
       aria-label={title}
     >
-      <p className={`mb-2 text-sm font-semibold ${action ? actionLabelColorClass[action] : 'text-slate-200'}`}>
-        {title}
-      </p>
-      <div className="flex min-h-12 flex-wrap gap-2">{children}</div>
+      <div className={inlineChildrenOnWide ? 'lg:flex lg:items-center lg:justify-between lg:gap-3' : ''}>
+        <p className={`mb-2 text-sm font-semibold ${inlineChildrenOnWide ? 'lg:mb-0' : ''} ${action ? actionLabelColorClass[action] : 'text-slate-200'}`}>
+          {title}
+        </p>
+        <div className="flex min-h-12 flex-wrap gap-2">{children}</div>
+      </div>
     </div>
   )
 }
@@ -185,21 +189,21 @@ export function DicePool({
   return (
     <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-950/70 p-4">
       <div>
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-col gap-1 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
           <h2 className="text-lg font-semibold text-slate-100">Dice Allocation</h2>
+          <p className="text-xs leading-tight text-slate-400 lg:flex-1 lg:px-2 lg:text-center">Assign all 6 dice, press Resolve Turn, then read results in Turn Log.</p>
           <button
             type="button"
-            className="rounded border border-cyan-300 px-2 py-1 text-xs font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded border border-cyan-300 px-2 py-1 text-xs font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50 lg:whitespace-nowrap"
             onClick={onAllocatePreferred}
             disabled={disabled}
           >
             Allocate Preferred
           </button>
         </div>
-        <p className="mt-0.5 text-xs leading-tight text-slate-400">First turn checklist: assign all 6 dice, press Resolve Turn, then read results in Turn Log.</p>
       </div>
 
-      <DropZone title="Unassigned" onDropDie={(dieId) => moveDie(dieId, null)} disabled={disabled}>
+      <DropZone title="Unassigned" onDropDie={(dieId) => moveDie(dieId, null)} disabled={disabled} inlineChildrenOnWide>
         {unassigned.map((die) => (
           <DiceToken key={die.id} die={die} disabled={disabled} />
         ))}

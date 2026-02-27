@@ -7,7 +7,7 @@ export const getPlanetState = ({ revealed, face }: Pick<Planet, 'revealed' | 'fa
     return 'unknown'
   }
 
-  if (face >= 5) {
+  if (face >= 4) {
     return 'macguffin'
   }
 

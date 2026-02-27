@@ -9,17 +9,22 @@ import { PlayerStatus } from './components/PlayerStatus'
 import { TurnResolution } from './components/TurnResolution'
 import { TurnLog } from './components/TurnLog'
 import { TurnControls } from './components/TurnControls'
+import { ResolveDiceAnimation } from './components/ResolveDiceAnimation'
 import { AboutPage } from './pages/AboutPage'
 import { emptyAllocation, gameReducer, initialGameState } from './reducers/gameReducer'
 import type { Allocation, Difficulty, GameMode, TurnResolutionPlaybackStage } from './types'
 import { buildPostGameNarrative } from './utils/buildPostGameNarrative'
+import { preloadDiceAnimationAssets } from './utils/dieAssets'
 
 const HELP_STORAGE_KEY = 'dice-odyssey-help-open'
 const AI_THINK_DELAY_MS = 600
 const RESOLVE_STAGE_DELAY_MS = 240
 const REDUCED_MOTION_STAGE_DELAY_MS = 80
 const REDUCED_MOTION_AI_DELAY_MS = 200
+const RESOLVE_ANIMATION_MS = 2000
 const MACGUFFIN_TOKEN_ICON = '/assets/ui/icon-macguffin-token.png'
+
+type ResolveAnimationVariant = 'rolling' | 'skip'
 
 const allDiceAllocated = (allocation: Allocation): boolean =>
   allocation.move.length + allocation.claim.length + allocation.sabotage.length === 6
@@ -34,9 +39,12 @@ function App() {
   const [hotseatCount, setHotseatCount] = useState(2)
   const [hotseatNames, setHotseatNames] = useState('Captain 1, Captain 2')
   const [debugEnabled, setDebugEnabled] = useState(false)
+  const [animationEnabled, setAnimationEnabled] = useState(true)
   const [draftAllocation, setDraftAllocation] = useState<Allocation>(emptyAllocation())
   const [showDebrief, setShowDebrief] = useState(false)
   const [playbackStage, setPlaybackStage] = useState<TurnResolutionPlaybackStage>('idle')
+  const [showResolveAnimation, setShowResolveAnimation] = useState(false)
+  const [resolveAnimationVariant, setResolveAnimationVariant] = useState<ResolveAnimationVariant>('rolling')
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
   const resolutionTimersRef = useRef<number[]>([])
   const [helpOpen, setHelpOpen] = useState<boolean>(() => {
@@ -68,7 +76,11 @@ function App() {
   }, [])
 
   useEffect(() => {
-    setDraftAllocation(emptyAllocation())
+    const timer = window.setTimeout(() => {
+      setDraftAllocation(emptyAllocation())
+    }, 0)
+
+    return () => window.clearTimeout(timer)
   }, [state.currentPlayerIndex, state.started])
 
   useEffect(() => {
@@ -98,7 +110,11 @@ function App() {
 
   useEffect(() => {
     if (state.winnerId) {
-      setShowDebrief(true)
+      const timer = window.setTimeout(() => {
+        setShowDebrief(true)
+      }, 0)
+
+      return () => window.clearTimeout(timer)
     }
   }, [state.winnerId])
 
@@ -117,6 +133,14 @@ function App() {
 
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
   }, [location.pathname])
+
+  useEffect(() => {
+    if (!animationEnabled && !state.animationEnabled) {
+      return
+    }
+
+    void preloadDiceAnimationAssets()
+  }, [animationEnabled, state.animationEnabled])
 
   const winnerName = useMemo(
     () => state.players.find((player) => player.id === state.winnerId)?.name,
@@ -145,6 +169,62 @@ function App() {
     [state.players, state.log, state.winnerId, state.winnerReason, state.turn],
   )
 
+  const turnResolutionRoundRecap = useMemo(() => {
+    if (state.turnResolutionHistory.length === 0) {
+      return undefined
+    }
+
+    const focusPlayer = state.players.find((player) => !player.isAI) ?? state.players[0]
+    const latestFocusTurnIndex =
+      focusPlayer
+        ? state.turnResolutionHistory.findIndex((snapshot) => snapshot.playerId === focusPlayer.id)
+        : -1
+
+    const windowedSnapshots =
+      latestFocusTurnIndex >= 0
+        ? state.turnResolutionHistory.slice(0, latestFocusTurnIndex + 1)
+        : state.turnResolutionHistory.slice(0, 1)
+
+    const chronologicalSnapshots = [...windowedSnapshots].reverse()
+
+    const lines = chronologicalSnapshots.map((snapshot) => {
+      if (snapshot.skipped) {
+        return `${snapshot.playerName} skipped turn (sabotage effect).`
+      }
+
+      const movedBy = Math.max(0, snapshot.position.after - snapshot.position.before)
+      const appliedSkips = snapshot.skips.appliedToTarget?.amount ?? 0
+      const targetName = snapshot.skips.appliedToTarget?.targetName
+
+      const claimPart =
+        snapshot.totals.gainedMacGuffins > 0
+          ? `claim +${snapshot.totals.gainedMacGuffins} MG`
+          : snapshot.claim.landedPlanetId
+            ? `claim no gain on P${snapshot.claim.landedPlanetId}`
+            : 'claim no target'
+
+      const sabotagePart =
+        appliedSkips > 0
+          ? `sabotage ${targetName ?? 'rival'} +${appliedSkips} skip`
+          : snapshot.totals.sabotage > 0
+            ? 'sabotage no impact'
+            : 'sabotage none'
+
+      return `${snapshot.playerName}: move +${movedBy} (${snapshot.position.before}→${snapshot.position.after}), ${claimPart}, ${sabotagePart}.`
+    })
+
+    return lines.join(' ')
+  }, [state.players, state.turnResolutionHistory])
+
+  const latestHumanTurnResolution = useMemo(() => {
+    const humanPlayer = state.players.find((player) => !player.isAI)
+    if (!humanPlayer) {
+      return undefined
+    }
+
+    return state.turnResolutionHistory.find((snapshot) => snapshot.playerId === humanPlayer.id)
+  }, [state.players, state.turnResolutionHistory])
+
   const startResolutionFlow = useCallback((allocation?: Allocation) => {
     if (!state.started || state.winnerId || !currentPlayer || isResolving) {
       return
@@ -164,39 +244,64 @@ function App() {
 
     setPlaybackStage(isSkippedTurn ? 'post' : 'move')
 
-    if (allocation) {
-      dispatch({ type: 'ALLOCATE_DICE', payload: allocation })
-    }
-
-    dispatch({ type: 'RESOLVE_TURN' })
-
     clearResolutionTimers()
 
-    if (!isSkippedTurn) {
-      resolutionTimersRef.current.push(
-        window.setTimeout(() => {
-          setPlaybackStage('claim')
-        }, resolveStageDelay),
-      )
-      resolutionTimersRef.current.push(
-        window.setTimeout(() => {
-          setPlaybackStage('sabotage')
-        }, resolveStageDelay * 2),
-      )
-      resolutionTimersRef.current.push(
-        window.setTimeout(() => {
-          setPlaybackStage('post')
-        }, resolveStageDelay * 3),
-      )
+    const continueResolution = () => {
+      if (allocation) {
+        dispatch({ type: 'ALLOCATE_DICE', payload: allocation })
+      }
+
+      dispatch({ type: 'RESOLVE_TURN' })
+
+      if (!isSkippedTurn) {
+        resolutionTimersRef.current.push(
+          window.setTimeout(() => {
+            setPlaybackStage('claim')
+          }, resolveStageDelay),
+        )
+        resolutionTimersRef.current.push(
+          window.setTimeout(() => {
+            setPlaybackStage('sabotage')
+          }, resolveStageDelay * 2),
+        )
+        resolutionTimersRef.current.push(
+          window.setTimeout(() => {
+            setPlaybackStage('post')
+          }, resolveStageDelay * 3),
+        )
+      }
+
+      resolutionTimersRef.current.push(window.setTimeout(() => {
+        dispatch({ type: 'NEXT_PLAYER' })
+        dispatch({ type: 'END_TURN_RESOLUTION' })
+        setPlaybackStage('idle')
+        resolutionTimersRef.current = []
+      }, isSkippedTurn ? resolveStageDelay * 2 : resolveStageDelay * 4))
     }
 
-    resolutionTimersRef.current.push(window.setTimeout(() => {
-      dispatch({ type: 'NEXT_PLAYER' })
-      dispatch({ type: 'END_TURN_RESOLUTION' })
-      setPlaybackStage('idle')
-      resolutionTimersRef.current = []
-    }, isSkippedTurn ? resolveStageDelay * 2 : resolveStageDelay * 4))
-  }, [state.started, state.winnerId, currentPlayer, isResolving, clearResolutionTimers, resolveStageDelay])
+    if (state.animationEnabled) {
+      void preloadDiceAnimationAssets()
+      setResolveAnimationVariant(isSkippedTurn ? 'skip' : 'rolling')
+      setShowResolveAnimation(true)
+      resolutionTimersRef.current.push(
+        window.setTimeout(() => {
+          setShowResolveAnimation(false)
+          continueResolution()
+        }, RESOLVE_ANIMATION_MS),
+      )
+      return
+    }
+
+    continueResolution()
+  }, [
+    state.started,
+    state.winnerId,
+    state.animationEnabled,
+    currentPlayer,
+    isResolving,
+    clearResolutionTimers,
+    resolveStageDelay,
+  ])
 
   useEffect(() => {
     if (!state.started || state.winnerId || !currentPlayer?.isAI || isResolving) {
@@ -230,6 +335,7 @@ function App() {
           aiCount: 0,
           difficulty,
           debugEnabled,
+          animationEnabled,
         },
       })
       return
@@ -243,6 +349,7 @@ function App() {
         aiCount,
         difficulty,
         debugEnabled,
+        animationEnabled,
       },
     })
   }
@@ -290,6 +397,8 @@ function App() {
   const handleNewGame = () => {
     clearResolutionTimers()
     setPlaybackStage('idle')
+    setShowResolveAnimation(false)
+    setResolveAnimationVariant('rolling')
     setShowDebrief(false)
     dispatch({ type: 'NEW_GAME' })
   }
@@ -331,49 +440,29 @@ function App() {
       <div className="flex min-h-screen flex-col">
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center p-6">
           <div className="rounded-2xl border border-slate-700 bg-slate-950/80 p-6">
-          <img
-            src="/assets/branding/hero-banner.png"
-            alt="Dice Odyssey hero banner"
-            className="mb-4 h-auto w-full rounded-xl border border-slate-700 object-cover"
-          />
-
           <div className="flex items-center gap-3">
             <img
               src="/assets/branding/dice-odyssey-logo.png"
               alt="Dice Odyssey logo"
               className="h-20 w-20 rounded-md border border-slate-700 object-cover"
             />
-            <div className="flex flex-col md:flex-row md:items-baseline md:gap-3">
-              <h1 className="text-3xl font-bold text-cyan-200">Dice Odyssey</h1>
-              <p className="text-slate-300">A dice-powered race for cosmic MacGuffins.</p>
+            <div className="flex flex-col">
+              <h1 className="text-[2.1rem] font-bold text-cyan-200">Dice Odyssey</h1>
             </div>
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-              <h2 className="text-sm font-semibold text-cyan-200">What</h2>
-              <p className="mt-1 text-xs text-slate-300">
-                Dice Odyssey is a turn-based space race. Move across planets, claim MacGuffins,
-                and disrupt rivals before the galaxy collapses.
-              </p>
-            </article>
-            <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-              <h2 className="text-sm font-semibold text-cyan-200">How</h2>
-              <p className="mt-1 text-xs text-slate-300">
-                Assign all 6 dice to Move, Claim, or Sabotage. Any color can go anywhere.
-                Matching color to slot gets +1 roll value; off-color gets -1 (minimum 1).
-              </p>
-            </article>
-            <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-              <h2 className="text-sm font-semibold text-cyan-200">Win</h2>
-              <p className="mt-1 text-xs text-slate-300">
-                Reach 5 MacGuffins first for race victory. If the galaxy runs out, survival winner
-                is highest MacGuffins, then farthest distance, then fewest pending skips.
-              </p>
-            </article>
+          <div className="relative mt-4">
+            <img
+              src="/assets/branding/hero-banner.png"
+              alt="Dice Odyssey hero banner"
+              className="h-auto w-full rounded-xl border border-slate-700 object-cover"
+            />
+            <p className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-md bg-slate-950/70 px-3 py-1 text-center text-base text-slate-100 backdrop-blur-sm">
+              A dice-powered race for cosmic MacGuffins.
+            </p>
           </div>
 
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
+          <div className="mt-6 grid gap-4 lg:grid-cols-4">
             <label className="flex flex-col gap-1 text-sm text-slate-200">
               Mode
               <select
@@ -450,22 +539,57 @@ function App() {
             )}
           </div>
 
-          <button
-            type="button"
-            className="mt-6 rounded-md bg-cyan-500 px-5 py-2 font-semibold text-slate-950"
-            onClick={handleStart}
-          >
-            Start Game
-          </button>
+          <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-2">
+            <button
+              type="button"
+              className="rounded-md bg-cyan-500 px-5 py-2 font-semibold text-slate-950 lg:whitespace-nowrap"
+              onClick={handleStart}
+            >
+              Start Game
+            </button>
 
-          <label className="mt-3 flex items-center gap-2 rounded-md border border-slate-700 bg-slate-900/60 p-2 text-sm text-slate-200">
-            <input
-              type="checkbox"
-              checked={debugEnabled}
-              onChange={(event) => setDebugEnabled(event.target.checked)}
-            />
-            Enable debug logging (captures every turn for post-game analysis)
-          </label>
+            <label className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-900/60 p-2 text-sm text-slate-200 lg:flex-1">
+              <input
+                type="checkbox"
+                checked={animationEnabled}
+                onChange={(event) => setAnimationEnabled(event.target.checked)}
+              />
+              Show animation
+            </label>
+
+            <label className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-900/60 p-2 text-sm text-slate-200 lg:flex-1">
+              <input
+                type="checkbox"
+                checked={debugEnabled}
+                onChange={(event) => setDebugEnabled(event.target.checked)}
+              />
+              Enable logging
+            </label>
+          </div>
+
+          <div className="mt-6 grid gap-3 md:grid-cols-3">
+            <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+              <h2 className="text-sm font-semibold text-cyan-200">What</h2>
+              <p className="mt-1 text-xs text-slate-300">
+                Dice Odyssey is a turn-based space race. Move across planets, claim MacGuffins,
+                and disrupt rivals before the galaxy collapses.
+              </p>
+            </article>
+            <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+              <h2 className="text-sm font-semibold text-cyan-200">How</h2>
+              <p className="mt-1 text-xs text-slate-300">
+                Assign all 6 dice to Move, Claim, or Sabotage. Any color can go anywhere.
+                Matching color to slot gets +1 roll value; off-color gets -1 (minimum 1).
+              </p>
+            </article>
+            <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+              <h2 className="text-sm font-semibold text-cyan-200">Win</h2>
+              <p className="mt-1 text-xs text-slate-300">
+                Reach 5 MacGuffins first for race victory. If the galaxy runs out, survival winner
+                is highest MacGuffins, then farthest distance, then fewest pending skips.
+              </p>
+            </article>
+          </div>
           </div>
         </div>
         <AppFooter />
@@ -486,8 +610,11 @@ function App() {
             />
             <div>
               <h1 className="text-2xl font-bold text-cyan-200">Dice Odyssey</h1>
-              <p className="text-sm text-slate-300">
-                Round {currentRound} · Turn {state.turn} · Current: {currentPlayer?.name ?? '—'}
+              <p className="flex flex-wrap items-center gap-1 text-sm text-slate-300">
+                <span>Round {currentRound} · Turn {state.turn} · Current:</span>
+                <span className="rounded border border-cyan-300/70 bg-cyan-900/40 px-1.5 py-0.5 font-semibold text-cyan-100">
+                  {currentPlayer?.name ?? '—'}
+                </span>
               </p>
             </div>
           </div>
@@ -575,7 +702,7 @@ function App() {
               </div>
               <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
                 <p className="font-semibold text-cyan-200">Board Reading</p>
-                <p className="mt-1">Unknown icon/? means unrevealed. Landing reveals that planet’s face and state (Barren, Event, or MacGuffin-rich). Claim dice only test your landed planet: rolls above face count as successes. Faces 5–6 are reward planets; Claimed means that reward was already harvested.</p>
+                <p className="mt-1">Unknown icon/? means unrevealed. Landing reveals that planet’s face and state (Barren, Event, or MacGuffin-rich). Claim dice only test your landed planet: rolls at or above face count as successes. Faces 4–6 can award MacGuffins; Claimed means that reward was already harvested.</p>
               </div>
               <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
                 <p className="font-semibold text-cyan-200">Key Rules</p>
@@ -632,15 +759,25 @@ function App() {
           <PlayerStatus players={state.players} currentPlayerId={currentPlayer?.id} />
         </div>
 
+        {turnResolutionRoundRecap && (
+          <section className="rounded-xl border border-cyan-400/50 bg-cyan-900/20 p-4 text-cyan-50">
+            <h2 className="text-lg font-semibold text-cyan-100">Round Recap</h2>
+            <p className="mt-2 text-xs leading-relaxed text-cyan-50">{turnResolutionRoundRecap}</p>
+          </section>
+        )}
+
         <TurnResolution
           summary={state.latestTurnResolution}
+          humanSummary={latestHumanTurnResolution}
           resolving={isResolving}
           playbackStage={playbackStage}
         />
 
         <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
-          <h2 className="mb-2 text-lg font-semibold text-slate-100">Turn Log</h2>
-          <p className="mb-2 text-xs text-slate-400">Read newest entries at top. Badges show round, turn, acting player, and event type. Each card is one resolved turn. Multiple lines in a card are outcomes from that same turn.</p>
+          <div className="mb-2 flex flex-col gap-1 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
+            <h2 className="text-lg font-semibold text-slate-100">Turn Log</h2>
+            <p className="text-xs text-slate-400 lg:max-w-4xl lg:text-right">Read newest entries at top. Badges show round, turn, acting player, and event type. Each card is one resolved turn. Multiple lines in a card are outcomes from that same turn.</p>
+          </div>
           <TurnLog log={state.log} players={state.players} />
         </section>
 
@@ -669,6 +806,13 @@ function App() {
           </section>
         )}
         </div>
+
+        <ResolveDiceAnimation
+          active={showResolveAnimation}
+          playerName={currentPlayer?.name}
+          variant={resolveAnimationVariant}
+          prefersReducedMotion={prefersReducedMotion}
+        />
       </DndProvider>
       <AppFooter />
     </div>
