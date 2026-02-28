@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type SyntheticEvent } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 import { Link, Navigate, useLocation } from 'react-router-dom'
@@ -15,7 +15,7 @@ import { OpponentBioPage } from './pages/OpponentBioPage'
 import { OpponentsPage } from './pages/OpponentsPage'
 import { emptyAllocation, gameReducer, initialGameState } from './reducers/gameReducer'
 import type { Allocation, Difficulty, GameMode, TurnResolutionPlaybackStage } from './types'
-import { findAICharacterBySlug, OPPONENT_THUMBNAIL_FALLBACK_SRC } from './data/aiCharacters'
+import { findAICharacterBySlug } from './data/aiCharacters'
 import { buildPostGameNarrative } from './utils/buildPostGameNarrative'
 import { preloadDiceAnimationAssets } from './utils/dieAssets'
 
@@ -34,7 +34,6 @@ interface ActiveOpponent {
   shortName: string
   slug: string
   fullName?: string
-  thumbnailSrc?: string
 }
 
 const allDiceAllocated = (allocation: Allocation): boolean =>
@@ -57,15 +56,6 @@ const getOpponentBioSlug = (pathname: string): string | undefined => {
 
   const slug = pathname.slice(prefix.length)
   return slug.length > 0 ? slug : undefined
-}
-
-const withImageFallback = (event: SyntheticEvent<HTMLImageElement>, fallbackSrc: string) => {
-  const image = event.currentTarget
-  if (image.src.endsWith(fallbackSrc)) {
-    return
-  }
-
-  image.src = fallbackSrc
 }
 
 function App() {
@@ -223,7 +213,6 @@ function App() {
           shortName: player.name,
           slug: player.aiCharacterSlug,
           fullName: character?.fullName,
-          thumbnailSrc: character?.thumbnailSrc,
         })
 
         return collected
@@ -574,7 +563,7 @@ function App() {
                 value={mode}
                 onChange={(event) => setMode(event.target.value as GameMode)}
               >
-                <option value="single">Single Player (vs AI)</option>
+                <option value="single">Single Player</option>
                 <option value="hotseat">Hotseat Multiplayer</option>
               </select>
             </label>
@@ -714,16 +703,16 @@ function App() {
             />
             <div className="min-w-0">
               <h1 className="text-2xl font-bold text-cyan-200">Dice Odyssey</h1>
-              <div className="mt-1 flex items-center gap-2 overflow-x-auto whitespace-nowrap pr-1 text-sm text-slate-300">
+              <div className="mt-1 flex flex-wrap items-center gap-2 pr-1 text-sm text-slate-300 md:flex-nowrap md:overflow-x-auto md:whitespace-nowrap">
                 <span className="shrink-0">Round {currentRound} · Turn {state.turn} · Current:</span>
                 <span className="shrink-0 rounded border border-cyan-300/70 bg-cyan-900/40 px-1.5 py-0.5 font-semibold text-cyan-100">
                   {currentPlayer?.name ?? '—'}
                 </span>
                 {activeOpponents.length > 0 && (
                   <>
-                    <span className="mx-0.5 shrink-0 text-slate-500">·</span>
+                    <span className="mx-0.5 hidden shrink-0 text-slate-500 md:inline">·</span>
                     <span className="shrink-0 text-slate-300">Opponents:</span>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       {activeOpponents.map((opponent) => (
                         <Link
                           key={opponent.id}
@@ -731,13 +720,6 @@ function App() {
                           state={{ fromGame: true }}
                           className="inline-flex shrink-0 items-center gap-1 rounded border border-slate-600 bg-slate-900/60 px-1.5 py-0.5 text-xs text-slate-100 hover:border-slate-500"
                         >
-                          <img
-                            src={opponent.thumbnailSrc ?? OPPONENT_THUMBNAIL_FALLBACK_SRC}
-                            alt=""
-                            aria-hidden="true"
-                            className="h-4 w-4 rounded object-cover"
-                            onError={(event) => withImageFallback(event, OPPONENT_THUMBNAIL_FALLBACK_SRC)}
-                          />
                           <span>{opponent.shortName}</span>
                         </Link>
                       ))}
@@ -745,7 +727,7 @@ function App() {
                     <Link
                       to="/opponents"
                       state={{ fromGame: true }}
-                      className="ml-1 shrink-0 text-xs text-cyan-300 hover:text-cyan-200"
+                      className="shrink-0 text-xs text-cyan-300 hover:text-cyan-200 md:ml-1"
                     >
                       View all
                     </Link>

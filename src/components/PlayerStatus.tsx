@@ -1,4 +1,6 @@
+import type { SyntheticEvent } from 'react'
 import type { Player } from '../types'
+import { findAICharacterBySlug, OPPONENT_THUMBNAIL_FALLBACK_SRC } from '../data/aiCharacters'
 
 interface PlayerStatusProps {
   players: Player[]
@@ -21,6 +23,15 @@ const playerBadgeClasses = [
 
 const macguffinTokenIcon = '/assets/ui/icon-macguffin-token.png'
 
+const withImageFallback = (event: SyntheticEvent<HTMLImageElement>) => {
+  const image = event.currentTarget
+  if (image.src.endsWith(OPPONENT_THUMBNAIL_FALLBACK_SRC)) {
+    return
+  }
+
+  image.src = OPPONENT_THUMBNAIL_FALLBACK_SRC
+}
+
 export function PlayerStatus({ players, currentPlayerId }: PlayerStatusProps) {
   const playerStyles = new Map<string, { accent: string; badge: string }>()
   players.forEach((player, index) => {
@@ -35,7 +46,10 @@ export function PlayerStatus({ players, currentPlayerId }: PlayerStatusProps) {
       <h2 className="mb-3 text-lg font-semibold text-slate-100">Captain Status</h2>
       <p className="mb-3 text-xs text-slate-400">MacGuffins: first to 7 wins. Position: where your ship is. Skips: turns you must pass (max 3 stacked). Defense: subtracts incoming sabotage skips.</p>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-        {players.map((player) => (
+        {players.map((player) => {
+          const aiCharacter = player.aiCharacterSlug ? findAICharacterBySlug(player.aiCharacterSlug) : undefined
+
+          return (
           <div
             key={player.id}
             className={`rounded-lg border border-slate-700 bg-slate-900/50 p-3 border-l-4 ${playerStyles.get(player.id)?.accent ?? 'border-l-slate-500'} ${
@@ -44,13 +58,22 @@ export function PlayerStatus({ players, currentPlayerId }: PlayerStatusProps) {
           >
             <div className="flex items-center justify-between">
               <p className="font-semibold text-slate-100">{player.name}</p>
-              <p
-                className={`rounded border px-1.5 py-0.5 text-xs uppercase ${
-                  playerStyles.get(player.id)?.badge ?? 'border-slate-600 bg-slate-800 text-slate-300'
-                }`}
-              >
-                {player.isAI ? 'AI' : 'Human'}
-              </p>
+              {player.isAI ? (
+                <img
+                  src={aiCharacter?.thumbnailSrc ?? OPPONENT_THUMBNAIL_FALLBACK_SRC}
+                  alt={`${player.name} portrait`}
+                  className="h-7 w-7 rounded border border-slate-400/90 object-cover"
+                  onError={withImageFallback}
+                />
+              ) : (
+                <p
+                  className={`rounded border px-1.5 py-0.5 text-xs uppercase ${
+                    playerStyles.get(player.id)?.badge ?? 'border-slate-600 bg-slate-800 text-slate-300'
+                  }`}
+                >
+                  Human
+                </p>
+              )}
             </div>
             <div className="mt-2 space-y-1 text-sm text-slate-300">
               <p>Position: {player.shipPos}</p>
@@ -68,7 +91,8 @@ export function PlayerStatus({ players, currentPlayerId }: PlayerStatusProps) {
               <p>Defense: {player.defense}</p>
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
