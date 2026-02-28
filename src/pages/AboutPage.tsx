@@ -23,7 +23,7 @@ const sections = [
   },
   {
     title: 'Galaxy Collapse and Winning',
-    body: 'The galaxy shrinks every 5 turns by 2 planets. First player to 5 MacGuffins wins by race. If the galaxy empties first, survival winner is highest MacGuffins, then farthest position, then fewest pending skips.',
+    body: 'The galaxy shrinks every 5 turns by 2 planets. First player to 7 MacGuffins wins by race. If the galaxy empties first, survival winner is highest MacGuffins, then farthest position, then fewest pending skips.',
   },
   {
     title: 'Reading the UI',
@@ -47,12 +47,20 @@ export function AboutPage() {
               <p className="text-sm text-slate-300">Everything you need to understand the game in one place.</p>
             </div>
           </div>
-          <Link
-            to="/"
-            className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
-          >
-            ← Back to Home
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              to="/opponents"
+              className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
+            >
+              Opponents
+            </Link>
+            <Link
+              to="/"
+              className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
+            >
+              ← Back to Home
+            </Link>
+          </div>
         </div>
       </section>
 

@@ -13,13 +13,14 @@ import {
   type TurnResolutionSnapshot,
   type TurnResolutionState,
 } from '../types'
+import { pickRandomUniqueAICharacters } from '../data/aiCharacters'
 import { rollDie } from '../utils/rollDie'
 
 const DICE_COLORS: Color[] = ['red', 'red', 'blue', 'blue', 'green', 'green']
 const INITIAL_GALAXY_SIZE = 12
 const SHRINK_INTERVAL = 5
 const SHRINK_COUNT = 2
-const WINNING_MACGUFFINS = 5
+const WINNING_MACGUFFINS = 7
 const SABOTAGE_RANGE = 2
 const MAX_SKIPPED_TURNS = 3
 const MAX_MACGUFFINS_PER_CLAIM = 8
@@ -90,10 +91,11 @@ const makePlanet = (id: number): Planet => ({
 const makeDicePool = (playerId: string) =>
   DICE_COLORS.map((color, index) => ({ id: `${playerId}-die-${index}`, color }))
 
-const makePlayer = (id: string, name: string, isAI: boolean): Player => ({
+const makePlayer = (id: string, name: string, isAI: boolean, aiCharacterSlug?: string): Player => ({
   id,
   name,
   isAI,
+  aiCharacterSlug,
   shipPos: 0,
   macGuffins: 0,
   skippedTurns: 0,
@@ -109,9 +111,15 @@ const createPlayers = (payload: InitGamePayload): Player[] => {
   }
 
   const humans = [makePlayer('human', payload.humanNames[0] || 'Human', false)]
-  const ais = Array.from({ length: payload.aiCount }, (_, index) =>
-    makePlayer(`ai-${index + 1}`, `AI ${index + 1}`, true),
-  )
+  const selectedCharacters = pickRandomUniqueAICharacters(payload.aiCount)
+  const ais = Array.from({ length: payload.aiCount }, (_, index) => {
+    const character = selectedCharacters[index]
+    if (!character) {
+      return makePlayer(`ai-${index + 1}`, `AI ${index + 1}`, true)
+    }
+
+    return makePlayer(`ai-${index + 1}`, character.shortName, true, character.slug)
+  })
 
   return [...humans, ...ais]
 }

@@ -95,6 +95,14 @@ export function GalaxyBoard({
                   ? 'border-amber-300 ring-1 ring-amber-300/70'
                   : 'border-slate-700'
 
+          const planetStatusLabel = planet.claimed
+            ? 'Claimed'
+            : !planet.revealed
+              ? ''
+              : planetState === 'barren'
+                ? 'Barren'
+                : 'Unclaimed'
+
           return (
             <div
               key={planet.id}
@@ -111,7 +119,7 @@ export function GalaxyBoard({
                 {planet.revealed ? planet.face : '?'}
               </p>
               <p className="text-[9px] uppercase tracking-wide text-slate-400 sm:text-[10px]">
-                {planet.claimed ? 'Claimed' : 'Unclaimed'}
+                {planetStatusLabel}
               </p>
               <div className="mt-2 flex flex-wrap justify-center gap-1">
                 {onPlanet.map((player) => (

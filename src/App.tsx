@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type SyntheticEvent } from 'react'
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 import { Link, Navigate, useLocation } from 'react-router-dom'
@@ -11,8 +11,11 @@ import { TurnLog } from './components/TurnLog'
 import { TurnControls } from './components/TurnControls'
 import { ResolveDiceAnimation } from './components/ResolveDiceAnimation'
 import { AboutPage } from './pages/AboutPage'
+import { OpponentBioPage } from './pages/OpponentBioPage'
+import { OpponentsPage } from './pages/OpponentsPage'
 import { emptyAllocation, gameReducer, initialGameState } from './reducers/gameReducer'
 import type { Allocation, Difficulty, GameMode, TurnResolutionPlaybackStage } from './types'
+import { findAICharacterBySlug, OPPONENT_THUMBNAIL_FALLBACK_SRC } from './data/aiCharacters'
 import { buildPostGameNarrative } from './utils/buildPostGameNarrative'
 import { preloadDiceAnimationAssets } from './utils/dieAssets'
 
@@ -26,11 +29,49 @@ const MACGUFFIN_TOKEN_ICON = '/assets/ui/icon-macguffin-token.png'
 
 type ResolveAnimationVariant = 'rolling' | 'skip'
 
+interface ActiveOpponent {
+  id: string
+  shortName: string
+  slug: string
+  fullName?: string
+  thumbnailSrc?: string
+}
+
 const allDiceAllocated = (allocation: Allocation): boolean =>
   allocation.move.length + allocation.claim.length + allocation.sabotage.length === 6
 
+const getNormalizedPathname = (pathname: string): string => {
+  if (pathname.length <= 1) {
+    return pathname
+  }
+
+  return pathname.replace(/\/+$/, '')
+}
+
+const getOpponentBioSlug = (pathname: string): string | undefined => {
+  const prefix = '/opponents/'
+
+  if (!pathname.startsWith(prefix)) {
+    return undefined
+  }
+
+  const slug = pathname.slice(prefix.length)
+  return slug.length > 0 ? slug : undefined
+}
+
+const withImageFallback = (event: SyntheticEvent<HTMLImageElement>, fallbackSrc: string) => {
+  const image = event.currentTarget
+  if (image.src.endsWith(fallbackSrc)) {
+    return
+  }
+
+  image.src = fallbackSrc
+}
+
 function App() {
   const location = useLocation()
+  const pathname = getNormalizedPathname(location.pathname)
+  const opponentBioSlug = getOpponentBioSlug(pathname)
   const [state, dispatch] = useReducer(gameReducer, initialGameState)
   const [mode, setMode] = useState<GameMode>('single')
   const [difficulty, setDifficulty] = useState<Difficulty>('medium')
@@ -167,6 +208,27 @@ function App() {
         turn: state.turn,
       }),
     [state.players, state.log, state.winnerId, state.winnerReason, state.turn],
+  )
+
+  const activeOpponents = useMemo(
+    () =>
+      state.players.reduce<ActiveOpponent[]>((collected, player) => {
+        if (!player.isAI || !player.aiCharacterSlug) {
+          return collected
+        }
+
+        const character = findAICharacterBySlug(player.aiCharacterSlug)
+        collected.push({
+          id: player.id,
+          shortName: player.name,
+          slug: player.aiCharacterSlug,
+          fullName: character?.fullName,
+          thumbnailSrc: character?.thumbnailSrc,
+        })
+
+        return collected
+      }, []),
+    [state.players],
   )
 
   const turnResolutionRoundRecap = useMemo(() => {
@@ -430,7 +492,7 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
-  if (location.pathname === '/about') {
+  if (pathname === '/about') {
     return (
       <div className="flex min-h-screen flex-col">
         <AboutPage />
@@ -439,7 +501,25 @@ function App() {
     )
   }
 
-  if (location.pathname !== '/') {
+  if (pathname === '/opponents') {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <OpponentsPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (opponentBioSlug) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <OpponentBioPage slug={opponentBioSlug} />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (pathname !== '/') {
     return <Navigate to="/" replace />
   }
 
@@ -459,12 +539,20 @@ function App() {
                 <h1 className="text-[2.1rem] font-bold text-cyan-200">Dice Odyssey</h1>
               </div>
             </div>
-            <Link
-              to="/about"
-              className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
-            >
-              About
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                to="/opponents"
+                className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
+              >
+                Opponents
+              </Link>
+              <Link
+                to="/about"
+                className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
+              >
+                About
+              </Link>
+            </div>
           </div>
 
           <div className="relative mt-4">
@@ -601,7 +689,7 @@ function App() {
             <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
               <h2 className="text-sm font-semibold text-cyan-200">Win</h2>
               <p className="mt-1 text-xs text-slate-300">
-                Reach 5 MacGuffins first for race victory. If the galaxy runs out, survival winner
+                Reach 7 MacGuffins first for race victory. If the galaxy runs out, survival winner
                 is highest MacGuffins, then farthest distance, then fewest pending skips.
               </p>
             </article>
@@ -617,34 +705,66 @@ function App() {
     <div className="flex min-h-screen flex-col">
       <DndProvider backend={HTML5Backend}>
         <div className="mx-auto w-full max-w-6xl flex-1 space-y-4 p-4 md:p-6">
-        <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-950/70 p-4">
+        <header className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-700 bg-slate-950/70 p-4">
           <div className="flex items-center gap-3">
             <img
               src="/assets/branding/dice-odyssey-logo.png"
               alt="Dice Odyssey logo"
               className="h-14 w-14 rounded-md border border-slate-700 object-cover"
             />
-            <div>
+            <div className="min-w-0">
               <h1 className="text-2xl font-bold text-cyan-200">Dice Odyssey</h1>
-              <p className="flex flex-wrap items-center gap-1 text-sm text-slate-300">
-                <span>Round {currentRound} · Turn {state.turn} · Current:</span>
-                <span className="rounded border border-cyan-300/70 bg-cyan-900/40 px-1.5 py-0.5 font-semibold text-cyan-100">
+              <div className="mt-1 flex items-center gap-2 overflow-x-auto whitespace-nowrap pr-1 text-sm text-slate-300">
+                <span className="shrink-0">Round {currentRound} · Turn {state.turn} · Current:</span>
+                <span className="shrink-0 rounded border border-cyan-300/70 bg-cyan-900/40 px-1.5 py-0.5 font-semibold text-cyan-100">
                   {currentPlayer?.name ?? '—'}
                 </span>
-              </p>
+                {activeOpponents.length > 0 && (
+                  <>
+                    <span className="mx-0.5 shrink-0 text-slate-500">·</span>
+                    <span className="shrink-0 text-slate-300">Opponents:</span>
+                    <div className="flex items-center gap-1.5">
+                      {activeOpponents.map((opponent) => (
+                        <Link
+                          key={opponent.id}
+                          to={`/opponents/${opponent.slug}`}
+                          state={{ fromGame: true }}
+                          className="inline-flex shrink-0 items-center gap-1 rounded border border-slate-600 bg-slate-900/60 px-1.5 py-0.5 text-xs text-slate-100 hover:border-slate-500"
+                        >
+                          <img
+                            src={opponent.thumbnailSrc ?? OPPONENT_THUMBNAIL_FALLBACK_SRC}
+                            alt=""
+                            aria-hidden="true"
+                            className="h-4 w-4 rounded object-cover"
+                            onError={(event) => withImageFallback(event, OPPONENT_THUMBNAIL_FALLBACK_SRC)}
+                          />
+                          <span>{opponent.shortName}</span>
+                        </Link>
+                      ))}
+                    </div>
+                    <Link
+                      to="/opponents"
+                      state={{ fromGame: true }}
+                      className="ml-1 shrink-0 text-xs text-cyan-300 hover:text-cyan-200"
+                    >
+                      View all
+                    </Link>
+                  </>
+                )}
+              </div>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 pt-1 md:self-end md:pt-0">
             <button
               type="button"
-              className="rounded-md border border-slate-600 px-3 py-2 text-sm font-semibold text-slate-100"
+              className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold leading-tight text-slate-100"
               onClick={() => setHelpOpen((value) => !value)}
             >
               {helpOpen ? 'Hide Help & Tips' : 'Show Help & Tips'}
             </button>
             <button
               type="button"
-              className="rounded-md border border-slate-600 px-3 py-2 text-sm font-semibold text-slate-100"
+              className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold leading-tight text-slate-100"
               onClick={handleNewGame}
             >
               New Game

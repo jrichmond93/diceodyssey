@@ -43,6 +43,7 @@ export interface Player {
   id: string
   name: string
   isAI: boolean
+  aiCharacterSlug?: string
   shipPos: number
   macGuffins: number
   skippedTurns: number

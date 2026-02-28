@@ -33,7 +33,7 @@ export function PlayerStatus({ players, currentPlayerId }: PlayerStatusProps) {
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
       <h2 className="mb-3 text-lg font-semibold text-slate-100">Captain Status</h2>
-      <p className="mb-3 text-xs text-slate-400">MacGuffins: first to 5 wins. Position: where your ship is. Skips: turns you must pass (max 3 stacked). Defense: subtracts incoming sabotage skips.</p>
+      <p className="mb-3 text-xs text-slate-400">MacGuffins: first to 7 wins. Position: where your ship is. Skips: turns you must pass (max 3 stacked). Defense: subtracts incoming sabotage skips.</p>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
         {players.map((player) => (
           <div

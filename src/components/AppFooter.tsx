@@ -22,6 +22,9 @@ export function AppFooter() {
           <NavLink to="/about" className={navLinkClass}>
             About
           </NavLink>
+          <NavLink to="/opponents" className={navLinkClass}>
+            Opponents
+          </NavLink>
         </nav>
       </div>
     </footer>
