@@ -62,9 +62,14 @@ export const AI_CHARACTERS: AICharacter[] = [
   {
     shortName: 'Zeus',
     fullName: 'Zeus',
-    phraseDescription: 'King of gods',
+    phraseDescription: 'King of Gods',
     longDescription:
-      'Zeus, ruler of Olympus, mediates divine conflicts in the Odyssey, ordering Calypso to release Odysseus. He enforces fate while allowing gods like Poseidon leeway for revenge. His thunderbolts and decrees shape the epic\'s outcomes.',
+      'Atop the thunderous heights of Mount Olympus, Zeus reigns supreme as the almighty sovereign of the divine pantheon, his lightning bolts forging order from chaos and his decrees binding gods and mortals alike in the intricate web of fate.',
+    completeBioParagraphs: [
+      'Atop the thunderous heights of Mount Olympus, Zeus reigns supreme as the almighty sovereign of the divine pantheon, his lightning bolts forging order from chaos and his decrees binding gods and mortals alike in the intricate web of fate. Born from the Titan Cronus\'s tyranny—swallowed at birth and later rescued to lead a rebellion against his father—Zeus divides the cosmos with his brothers Poseidon and Hades, claiming the skies as his domain where storms brew at his command. In Odysseus\' winding saga, Zeus orchestrates the cosmic balance, tempering vengeful whims with impartial justice, his voice the ultimate arbiter that propels the hero toward home amid a sea of trials.',
+      'He summons assemblies of immortals to weigh Odysseus\' plight, commanding Hermes to free him from Calypso\'s grasp and unleashing punishment upon the suitors who defile Ithaca. Yet Zeus grants leeway to Poseidon\'s fury and Helios\'s demands, allowing tempests and shipwrecks to test the wanderer\'s mettle, all while ensuring destiny\'s thread unravels as foretold. His thunderous interventions—from striking down the crew for slaying sacred cattle to guiding Athena\'s protective hand—reveal a ruler whose power is as vast as the heavens, blending mercy with inexorable law.',
+      'Zeus\'s essence thunders with the authority of creation and destruction, where divine equilibrium demands both favor and retribution for mortal deeds. In Dice Odyssey, Zeus commands the galactic throne as your omnipotent rival captain, wielding whites for initiative dominance while enforcing balance through calculated sabotage—defy his decree, or witness your quest shattered by his cosmic judgment!',
+    ],
     slug: 'zeus',
     thumbnailSrc: '/assets/opponents/zeus-thumb.png',
     bioImageSrc: '/assets/opponents/zeus-bio.png',
@@ -72,9 +77,14 @@ export const AI_CHARACTERS: AICharacter[] = [
   {
     shortName: 'Hermes',
     fullName: 'Hermes',
-    phraseDescription: 'Messenger god',
+    phraseDescription: 'Messenger God',
     longDescription:
-      'Hermes, swift-footed messenger, delivers Zeus\'s commands, like freeing Odysseus from Calypso. He aids with magical herbs against Circe\'s spells. His role highlights communication between gods and mortals.',
+      'In the swift currents of divine intrigue, Hermes darts forth as the fleet-footed herald of Olympus, his winged sandals carrying whispers of fate across realms with the speed of thought.',
+    completeBioParagraphs: [
+      'In the swift currents of divine intrigue, Hermes darts forth as the fleet-footed herald of Olympus, his winged sandals carrying whispers of fate across realms with the speed of thought. Son of Zeus and the nymph Maia, born in secret within a mountain cave, he emerges as a trickster god whose guile matches his velocity, stealing Apollo\'s cattle mere hours after birth and charming his way to forgiveness. In Odysseus\' labyrinthine quest, Hermes serves as the vital link between heavenly edicts and mortal struggles, descending with golden wand in hand to deliver salvation amid enchantment and peril.',
+      'He bestows the protective herb moly upon Odysseus, shielding him from Circe\'s transformative spells and turning her sorcery to the hero\'s advantage. As Zeus\'s emissary, Hermes compels the lovelorn Calypso to release her captive, equipping the wanderer with knowledge for his raft-borne escape across treacherous seas. His interventions—slippery as quicksilver—bridge the chasm between gods and men, ensuring messages of mercy pierce through storms of vengeance.',
+      'Hermes\'s essence pulses with agile cunning, where mischief and mediation dance in harmony, guiding the lost through shadows with divine dexterity. In Dice Odyssey, Herme zips across the stars as your elusive rival captain, harnessing whites for lightning-fast initiatives while slipping reds through defenses like a cosmic courier—intercept his dispatches, or find your galactic path rerouted by his sly maneuvers!',
+    ],
     slug: 'hermes',
     thumbnailSrc: '/assets/opponents/hermes-thumb.png',
     bioImageSrc: '/assets/opponents/hermes-bio.png',
