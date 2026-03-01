@@ -51,7 +51,7 @@ export function OpponentsPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-cyan-200">About Opponents</h1>
-            <p className="text-sm text-slate-300">Meet every AI rival in the Dice Odyssey roster.</p>
+            <p className="text-sm text-slate-300">Meet every AI rival in the Dice Odysseys roster.</p>
           </div>
           <Link
             to="/"

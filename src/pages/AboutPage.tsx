@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 const sections = [
   {
     title: 'Game Overview',
-    body: 'Dice Odyssey is a turn-based strategy race across a collapsing galaxy. You allocate six dice each turn, then actions resolve in order: Move, Claim, and Sabotage.',
+    body: 'Dice Odysseys is a turn-based strategy race across a collapsing galaxy. You allocate six dice each turn, then actions resolve in order: Move, Claim, and Sabotage.',
   },
   {
     title: 'Turn Flow',
@@ -39,11 +39,11 @@ export function AboutPage() {
           <div className="flex flex-wrap items-center gap-3">
             <img
               src="/assets/branding/dice-odyssey-logo.png"
-              alt="Dice Odyssey logo"
+              alt="Dice Odysseys logo"
               className="h-14 w-14 rounded-md border border-slate-700 object-cover"
             />
             <div>
-              <h1 className="text-2xl font-bold text-cyan-200">About Dice Odyssey</h1>
+              <h1 className="text-2xl font-bold text-cyan-200">About Dice Odysseys</h1>
               <p className="text-sm text-slate-300">Everything you need to understand the game in one place.</p>
             </div>
           </div>
@@ -67,7 +67,7 @@ export function AboutPage() {
       <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
         <h2 className="text-lg font-semibold text-slate-100">MVP Scope and Product Decisions</h2>
         <p className="mt-1 text-sm text-slate-300">
-          Dice Odyssey is intentionally built as an MVP: a fast, client-side prototype that proves the
+          Dice Odysseys is intentionally built as an MVP: a fast, client-side prototype that proves the
           core dice-allocation strategy loop before expanding into a larger online product.
         </p>
         <div className="mt-2 grid gap-3 md:grid-cols-2">

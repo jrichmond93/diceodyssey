@@ -1,7 +1,9 @@
-# Dice Odyssey
+# Dice Odysseys
 
-Dice Odyssey is a turn-based sci-fi strategy game built with React, TypeScript, and Vite.
+Dice Odysseys is a turn-based sci-fi strategy game built with React, TypeScript, and Vite.
 Players allocate 6 dice each turn across Move, Claim, and Sabotage to race for MacGuffins before galaxy collapse.
+
+Live domain: https://diceodysseys.com
 
 ## Gameplay (Current Rules)
 

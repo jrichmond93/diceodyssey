@@ -11,6 +11,7 @@ import { TurnLog } from './components/TurnLog'
 import { TurnControls } from './components/TurnControls'
 import { ResolveDiceAnimation } from './components/ResolveDiceAnimation'
 import { AboutPage } from './pages/AboutPage'
+import { ContactPage } from './pages/ContactPage'
 import { OpponentBioPage } from './pages/OpponentBioPage'
 import { OpponentsPage } from './pages/OpponentsPage'
 import { emptyAllocation, gameReducer, initialGameState } from './reducers/gameReducer'
@@ -19,7 +20,7 @@ import { findAICharacterBySlug } from './data/aiCharacters'
 import { buildPostGameNarrative } from './utils/buildPostGameNarrative'
 import { preloadDiceAnimationAssets } from './utils/dieAssets'
 
-const HELP_STORAGE_KEY = 'dice-odyssey-help-open'
+const HELP_STORAGE_KEY = 'dice-odysseys-help-open'
 const AI_THINK_DELAY_MS = 600
 const RESOLVE_STAGE_DELAY_MS = 240
 const REDUCED_MOTION_STAGE_DELAY_MS = 80
@@ -528,7 +529,7 @@ function App() {
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `dice-odyssey-debug-${Date.now()}.json`
+    anchor.download = `dice-odysseys-debug-${Date.now()}.json`
     anchor.click()
     URL.revokeObjectURL(url)
   }
@@ -546,6 +547,15 @@ function App() {
     return (
       <div className="flex min-h-screen flex-col">
         <OpponentsPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (pathname === '/contact') {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <ContactPage />
         <AppFooter />
       </div>
     )
@@ -573,11 +583,11 @@ function App() {
             <div className="flex items-center gap-3">
               <img
                 src="/assets/branding/dice-odyssey-logo.png"
-                alt="Dice Odyssey logo"
+                alt="Dice Odysseys logo"
                 className="h-20 w-20 rounded-md border border-slate-700 object-cover"
               />
               <div className="flex flex-col">
-                <h1 className="text-[2.1rem] font-bold text-cyan-200">Dice Odyssey</h1>
+                <h1 className="text-[2.1rem] font-bold text-cyan-200">Dice Odysseys</h1>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -599,7 +609,7 @@ function App() {
           <div className="relative mt-4">
             <img
               src="/assets/branding/hero-banner.png"
-              alt="Dice Odyssey hero banner"
+              alt="Dice Odysseys hero banner"
               className="h-auto w-full rounded-xl border border-slate-700 object-cover"
             />
             <p className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-md bg-slate-950/70 px-3 py-1 text-center text-base text-slate-100 backdrop-blur-sm">
@@ -716,22 +726,22 @@ function App() {
             <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
               <h2 className="text-sm font-semibold text-cyan-200">What</h2>
               <p className="mt-1 text-xs text-slate-300">
-                Dice Odyssey is a turn-based space race. Move across planets, claim MacGuffins,
+                Dice Odysseys is a turn-based space race. Move across planets, claim MacGuffins,
                 and disrupt rivals before the galaxy collapses.
               </p>
             </article>
             <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
               <h2 className="text-sm font-semibold text-cyan-200">How</h2>
               <p className="mt-1 text-xs text-slate-300">
-                Assign all 6 dice to Move, Claim, or Sabotage. Any color can go anywhere.
-                Matching color to slot gets +1 roll value; off-color gets -1 (minimum 1).
+                Assign all dice to Move, Claim, or Sabotage. Any color can go anywhere.
+                Matching color to slot gets +1 roll value; off-color gets -1.
               </p>
             </article>
             <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
               <h2 className="text-sm font-semibold text-cyan-200">Win</h2>
               <p className="mt-1 text-xs text-slate-300">
                 Reach 7 MacGuffins first for race victory. If the galaxy runs out, survival winner
-                is highest MacGuffins, then farthest distance, then fewest pending skips.
+                is highest MacGuffins.
               </p>
             </article>
           </div>
@@ -773,11 +783,11 @@ function App() {
           <div className="flex items-center gap-3">
             <img
               src="/assets/branding/dice-odyssey-logo.png"
-              alt="Dice Odyssey logo"
+              alt="Dice Odysseys logo"
               className="h-14 w-14 rounded-md border border-slate-700 object-cover"
             />
             <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-cyan-200">Dice Odyssey</h1>
+              <h1 className="text-2xl font-bold text-cyan-200">Dice Odysseys</h1>
               <div className="mt-1 flex flex-wrap items-center gap-2 pr-1 text-sm text-slate-300 md:flex-nowrap md:overflow-x-auto md:whitespace-nowrap">
                 <span className="shrink-0">Round {currentRound} · Turn {state.turn} · Current:</span>
                 <span className="shrink-0 rounded border border-cyan-300/70 bg-cyan-900/40 px-1.5 py-0.5 font-semibold text-cyan-100">
