@@ -15,3 +15,54 @@ body {
   color: #e2e8f0;
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
 }
+
+@keyframes human-win-fall {
+  0% {
+    transform: translate3d(0, -12vh, 0) rotate(0deg);
+    opacity: 0;
+  }
+
+  15% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate3d(0, 108vh, 0) rotate(320deg);
+    opacity: 0;
+  }
+}
+
+@keyframes human-win-banner-pulse {
+  0%,
+  100% {
+    transform: translateX(-50%) scale(1);
+  }
+
+  50% {
+    transform: translateX(-50%) scale(1.04);
+  }
+}
+
+.human-win-confetti {
+  position: absolute;
+  top: -12vh;
+  width: 0.45rem;
+  height: 0.95rem;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0;
+  animation-name: human-win-fall;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.human-win-banner {
+  animation: human-win-banner-pulse 900ms ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .human-win-confetti,
+  .human-win-banner {
+    animation: none;
+  }
+}

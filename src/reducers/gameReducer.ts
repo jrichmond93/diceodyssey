@@ -277,6 +277,55 @@ const chooseAction = (
   return sorted[0][0]
 }
 
+const enforceMinimumMoveDice = (
+  player: Player,
+  allocation: Allocation,
+  minimumMoveDice: number,
+): Allocation => {
+  if (allocation.move.length >= minimumMoveDice) {
+    return allocation
+  }
+
+  const dieColorById = new Map(player.dicePool.map((die) => [die.id, die.color]))
+  const rebalanced: Allocation = {
+    move: [...allocation.move],
+    claim: [...allocation.claim],
+    sabotage: [...allocation.sabotage],
+  }
+
+  const takeBestDieForMove = (pool: string[]): string | undefined => {
+    const preferredColors: Color[] = ['blue', 'green', 'red']
+
+    for (const color of preferredColors) {
+      const index = pool.findIndex((dieId) => dieColorById.get(dieId) === color)
+      if (index >= 0) {
+        const [dieId] = pool.splice(index, 1)
+        return dieId
+      }
+    }
+
+    return undefined
+  }
+
+  while (rebalanced.move.length < minimumMoveDice) {
+    const dieFromClaim = takeBestDieForMove(rebalanced.claim)
+    if (dieFromClaim) {
+      rebalanced.move.push(dieFromClaim)
+      continue
+    }
+
+    const dieFromSabotage = takeBestDieForMove(rebalanced.sabotage)
+    if (dieFromSabotage) {
+      rebalanced.move.push(dieFromSabotage)
+      continue
+    }
+
+    break
+  }
+
+  return rebalanced
+}
+
 export const computeAIAllocation = (
   player: Player,
   allPlayers: Player[],
@@ -340,6 +389,10 @@ export const computeAIAllocation = (
       priorities.sabotage -= 0.5
     }
   })
+
+  if (player.shipPos === 0) {
+    return enforceMinimumMoveDice(player, alloc, 2)
+  }
 
   return alloc
 }

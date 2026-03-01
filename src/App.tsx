@@ -27,6 +27,28 @@ const REDUCED_MOTION_AI_DELAY_MS = 200
 const RESOLVE_ANIMATION_MS = 2000
 const MACGUFFIN_TOKEN_ICON = '/assets/ui/icon-macguffin-token.png'
 
+const HUMAN_WIN_CELEBRATION_MS = 4200
+const HUMAN_WIN_REDUCED_MOTION_MS = 2400
+
+const humanWinConfetti = [
+  { left: 3, delay: 0, duration: 1850, colorClass: 'text-cyan-300' },
+  { left: 9, delay: 180, duration: 2050, colorClass: 'text-emerald-300' },
+  { left: 15, delay: 60, duration: 1950, colorClass: 'text-fuchsia-300' },
+  { left: 21, delay: 320, duration: 2120, colorClass: 'text-cyan-200' },
+  { left: 27, delay: 120, duration: 1880, colorClass: 'text-emerald-200' },
+  { left: 33, delay: 260, duration: 2200, colorClass: 'text-fuchsia-200' },
+  { left: 39, delay: 80, duration: 2000, colorClass: 'text-cyan-300' },
+  { left: 45, delay: 210, duration: 1920, colorClass: 'text-emerald-300' },
+  { left: 51, delay: 140, duration: 2160, colorClass: 'text-fuchsia-300' },
+  { left: 57, delay: 40, duration: 1860, colorClass: 'text-cyan-200' },
+  { left: 63, delay: 280, duration: 2060, colorClass: 'text-emerald-200' },
+  { left: 69, delay: 100, duration: 1980, colorClass: 'text-fuchsia-200' },
+  { left: 75, delay: 360, duration: 2140, colorClass: 'text-cyan-300' },
+  { left: 81, delay: 190, duration: 1900, colorClass: 'text-emerald-300' },
+  { left: 87, delay: 70, duration: 2080, colorClass: 'text-fuchsia-300' },
+  { left: 93, delay: 240, duration: 1960, colorClass: 'text-cyan-200' },
+]
+
 type ResolveAnimationVariant = 'rolling' | 'skip'
 
 interface ActiveOpponent {
@@ -77,7 +99,9 @@ function App() {
   const [showResolveAnimation, setShowResolveAnimation] = useState(false)
   const [resolveAnimationVariant, setResolveAnimationVariant] = useState<ResolveAnimationVariant>('rolling')
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
+  const [showHumanWinCelebration, setShowHumanWinCelebration] = useState(false)
   const resolutionTimersRef = useRef<number[]>([])
+  const celebrationTimerRef = useRef<number | null>(null)
   const [helpOpen, setHelpOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
       return false
@@ -132,6 +156,15 @@ function App() {
   }, [clearResolutionTimers])
 
   useEffect(() => {
+    return () => {
+      if (celebrationTimerRef.current !== null) {
+        window.clearTimeout(celebrationTimerRef.current)
+        celebrationTimerRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return
     }
@@ -182,6 +215,25 @@ function App() {
     () => state.players.find((player) => player.id === state.winnerId),
     [state.players, state.winnerId],
   )
+
+  useEffect(() => {
+    if (celebrationTimerRef.current !== null) {
+      window.clearTimeout(celebrationTimerRef.current)
+      celebrationTimerRef.current = null
+    }
+
+    if (!state.winnerId || !winnerPlayer || winnerPlayer.isAI) {
+      setShowHumanWinCelebration(false)
+      return
+    }
+
+    setShowHumanWinCelebration(true)
+    const celebrationDuration = prefersReducedMotion ? HUMAN_WIN_REDUCED_MOTION_MS : HUMAN_WIN_CELEBRATION_MS
+    celebrationTimerRef.current = window.setTimeout(() => {
+      setShowHumanWinCelebration(false)
+      celebrationTimerRef.current = null
+    }, celebrationDuration)
+  }, [state.winnerId, winnerPlayer, prefersReducedMotion])
 
   const currentRound = useMemo(() => {
     const playerCount = Math.max(state.players.length, 1)
@@ -693,6 +745,29 @@ function App() {
   return (
     <div className="flex min-h-screen flex-col">
       <DndProvider backend={HTML5Backend}>
+        {showHumanWinCelebration && (
+          <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden" aria-hidden="true">
+            <div className="absolute inset-0">
+              {!prefersReducedMotion &&
+                humanWinConfetti.map((particle, index) => (
+                  <span
+                    key={`${particle.left}-${particle.delay}-${index}`}
+                    className={`human-win-confetti ${particle.colorClass}`}
+                    style={{
+                      left: `${particle.left}%`,
+                      animationDelay: `${particle.delay}ms`,
+                      animationDuration: `${particle.duration}ms`,
+                    }}
+                  />
+                ))}
+            </div>
+            <div className="absolute left-1/2 top-24 h-40 w-40 -translate-x-1/2 rounded-full bg-cyan-400/20 blur-3xl" />
+            <div className="absolute left-1/2 top-20 h-52 w-52 -translate-x-1/2 rounded-full bg-emerald-400/15 blur-3xl" />
+            <div className="absolute left-1/2 top-10 -translate-x-1/2 rounded-full border border-cyan-300/60 bg-slate-900/80 px-5 py-2 text-sm font-semibold text-cyan-100 human-win-banner">
+              Human Victory!
+            </div>
+          </div>
+        )}
         <div className="mx-auto w-full max-w-6xl flex-1 space-y-4 p-4 md:p-6">
         <header className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-700 bg-slate-950/70 p-4">
           <div className="flex items-center gap-3">
@@ -786,18 +861,24 @@ function App() {
               <div className="space-y-2 rounded-lg border border-emerald-500/40 bg-slate-950/40 p-3 text-sm text-emerald-50">
                 <p className="font-semibold text-emerald-200">Post-Game Debrief</p>
                 <p>{postGameNarrative.headline}</p>
-                <p className="font-semibold text-emerald-200">Key Moments</p>
-                <ul className="list-disc space-y-1 pl-5">
-                  {postGameNarrative.keyMoments.map((moment) => (
-                    <li key={moment}>{moment}</li>
-                  ))}
-                </ul>
-                <p className="font-semibold text-emerald-200">Stats</p>
-                <ul className="list-disc space-y-1 pl-5">
-                  {postGameNarrative.stats.map((stat) => (
-                    <li key={stat}>{stat}</li>
-                  ))}
-                </ul>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <p className="font-semibold text-emerald-200">Key Moments</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-5">
+                      {postGameNarrative.keyMoments.map((moment) => (
+                        <li key={moment}>{moment}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-emerald-200">Stats</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-5">
+                      {postGameNarrative.stats.map((stat) => (
+                        <li key={stat}>{stat}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
                 <p className="font-semibold text-emerald-200">Why This Winner</p>
                 <p>{postGameNarrative.whyWinner}</p>
               </div>
@@ -842,6 +923,7 @@ function App() {
             resolving={isResolving}
             playbackStage={playbackStage}
             resolutionSummary={state.latestTurnResolution}
+            prefersReducedMotion={prefersReducedMotion}
           />
         </div>
 
