@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
+import { TouchBackend } from 'react-dnd-touch-backend'
 import { Link, Navigate, useLocation } from 'react-router-dom'
 import { AppFooter } from './components/AppFooter'
 import { DicePool } from './components/DicePool'
@@ -30,6 +31,7 @@ const MACGUFFIN_TOKEN_ICON = '/assets/ui/icon-macguffin-token.png'
 
 const HUMAN_WIN_CELEBRATION_MS = 4200
 const HUMAN_WIN_REDUCED_MOTION_MS = 2400
+const HUMAN_WIN_SCROLL_LEAD_MS = 260
 
 const humanWinConfetti = [
   { left: 3, delay: 0, duration: 1850, colorClass: 'text-cyan-300' },
@@ -217,6 +219,23 @@ function App() {
     [state.players, state.winnerId],
   )
 
+  const isTouchDevice = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return false
+    }
+
+    return 'ontouchstart' in window || window.navigator.maxTouchPoints > 0
+  }, [])
+
+  const dndBackend = isTouchDevice ? TouchBackend : HTML5Backend
+  const dndBackendOptions = isTouchDevice
+    ? {
+        enableMouseEvents: true,
+        delayTouchStart: 0,
+        ignoreContextMenu: true,
+      }
+    : undefined
+
   useEffect(() => {
     if (celebrationTimerRef.current !== null) {
       window.clearTimeout(celebrationTimerRef.current)
@@ -228,12 +247,18 @@ function App() {
       return
     }
 
-    setShowHumanWinCelebration(true)
-    const celebrationDuration = prefersReducedMotion ? HUMAN_WIN_REDUCED_MOTION_MS : HUMAN_WIN_CELEBRATION_MS
+    window.scrollTo({ top: 0, left: 0, behavior: prefersReducedMotion ? 'auto' : 'smooth' })
+
+    const celebrationStartDelay = prefersReducedMotion ? 0 : HUMAN_WIN_SCROLL_LEAD_MS
     celebrationTimerRef.current = window.setTimeout(() => {
-      setShowHumanWinCelebration(false)
-      celebrationTimerRef.current = null
-    }, celebrationDuration)
+      setShowHumanWinCelebration(true)
+
+      const celebrationDuration = prefersReducedMotion ? HUMAN_WIN_REDUCED_MOTION_MS : HUMAN_WIN_CELEBRATION_MS
+      celebrationTimerRef.current = window.setTimeout(() => {
+        setShowHumanWinCelebration(false)
+        celebrationTimerRef.current = null
+      }, celebrationDuration)
+    }, celebrationStartDelay)
   }, [state.winnerId, winnerPlayer, prefersReducedMotion])
 
   const currentRound = useMemo(() => {
@@ -754,7 +779,7 @@ function App() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <DndProvider backend={HTML5Backend}>
+      <DndProvider backend={dndBackend} options={dndBackendOptions}>
         {showHumanWinCelebration && (
           <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden" aria-hidden="true">
             <div className="absolute inset-0">
