@@ -28,31 +28,45 @@ export const fetchSessionSnapshot = async (
   sessionId: string,
   accessToken: string,
 ): Promise<SessionSnapshot> => {
-  const response = await fetch(`/api/sessions/${sessionId}`, {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  })
+  const fetchJsonSnapshot = async (path: string): Promise<SessionSnapshot> => {
+    const response = await fetch(path, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    })
 
-  if (!response.ok) {
-    throw new Error(`Snapshot refresh failed with status ${response.status}`)
+    if (!response.ok) {
+      throw new Error(`Snapshot refresh failed with status ${response.status}`)
+    }
+
+    const contentType = response.headers.get('content-type') ?? ''
+    if (!contentType.includes('application/json')) {
+      const bodyText = (await response.text()).slice(0, 120)
+      throw new Error(
+        `Snapshot endpoint returned non-JSON content (${contentType || 'unknown'}). Response starts with: ${bodyText}`,
+      )
+    }
+
+    const body = (await response.json()) as { snapshot?: SessionSnapshot }
+    if (!body.snapshot) {
+      throw new Error('Snapshot response missing snapshot payload.')
+    }
+
+    return body.snapshot
   }
 
-  const contentType = response.headers.get('content-type') ?? ''
-  if (!contentType.includes('application/json')) {
-    const bodyText = (await response.text()).slice(0, 120)
-    throw new Error(
-      `Snapshot endpoint returned non-JSON content (${contentType || 'unknown'}). Check API routing/proxy. Response starts with: ${bodyText}`,
-    )
-  }
+  try {
+    return await fetchJsonSnapshot(`/api/sessions/${sessionId}`)
+  } catch (primaryError) {
+    const message = primaryError instanceof Error ? primaryError.message : String(primaryError)
 
-  const body = (await response.json()) as { snapshot?: SessionSnapshot }
-  if (!body.snapshot) {
-    throw new Error('Snapshot response missing snapshot payload.')
-  }
+    if (!message.includes('non-JSON')) {
+      throw primaryError
+    }
 
-  return body.snapshot
+    return await fetchJsonSnapshot(`/api/sessions/${sessionId}/index`)
+  }
 }
 
 const isRealtimeEvent = (value: unknown): value is RealtimeEvent => {
