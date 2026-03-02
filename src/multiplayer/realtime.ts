@@ -116,6 +116,12 @@ const isRealtimeEvent = (value: unknown): value is RealtimeEvent => {
 const shouldRefreshOnStatus = (status: string): boolean =>
   status === 'SUBSCRIBED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'
 
+const eventRequiresSnapshotRefresh = (event: RealtimeEvent): boolean =>
+  event.type === 'PLAYER_JOINED' ||
+  event.type === 'PLAYER_LEFT' ||
+  event.type === 'MATCH_FOUND' ||
+  event.type === 'REMATCH_READY'
+
 export const createSessionRealtimeController = async (
   sessionId: string,
   callbacks: SessionRealtimeCallbacks,
@@ -173,6 +179,11 @@ export const createSessionRealtimeController = async (
         payload.type === 'REMATCH_STARTED'
       ) {
         publishSnapshot(payload.snapshot)
+        return
+      }
+
+      if (eventRequiresSnapshotRefresh(payload)) {
+        void refreshSnapshot()
       }
     })
 

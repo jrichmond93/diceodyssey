@@ -188,4 +188,46 @@ describe('createSessionRealtimeController', () => {
 
     await controller.disconnect()
   })
+
+  it('refreshes snapshot when receiving PLAYER_JOINED without embedded snapshot payload', async () => {
+    const { client, channels } = createMockRealtimeClient()
+    const snapshots: SessionSnapshot[] = []
+
+    const fetchSnapshot = vi
+      .fn<() => Promise<SessionSnapshot>>()
+      .mockResolvedValueOnce(buildSnapshot(1))
+      .mockResolvedValueOnce(buildSnapshot(2))
+
+    const controller = await createSessionRealtimeController(
+      's1',
+      {
+        onEvent: () => undefined,
+        onSnapshot: (snapshot) => snapshots.push(snapshot),
+      },
+      {
+        getAccessToken: async () => 'token',
+        fetchSnapshot,
+        createClient: () => client as never,
+      },
+    )
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(snapshots.map((snapshot) => snapshot.version)).toEqual([1])
+
+    channels[0]?.emitBroadcast({
+      type: 'PLAYER_JOINED',
+      userId: 'auth0|u2',
+      displayName: 'Pilot-2',
+    } satisfies RealtimeEvent)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(fetchSnapshot).toHaveBeenCalledTimes(2)
+    expect(snapshots.map((snapshot) => snapshot.version)).toEqual([1, 2])
+
+    await controller.disconnect()
+  })
 })
