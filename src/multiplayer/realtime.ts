@@ -39,7 +39,19 @@ export const fetchSessionSnapshot = async (
     throw new Error(`Snapshot refresh failed with status ${response.status}`)
   }
 
-  const body = (await response.json()) as { snapshot: SessionSnapshot }
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!contentType.includes('application/json')) {
+    const bodyText = (await response.text()).slice(0, 120)
+    throw new Error(
+      `Snapshot endpoint returned non-JSON content (${contentType || 'unknown'}). Check API routing/proxy. Response starts with: ${bodyText}`,
+    )
+  }
+
+  const body = (await response.json()) as { snapshot?: SessionSnapshot }
+  if (!body.snapshot) {
+    throw new Error('Snapshot response missing snapshot payload.')
+  }
+
   return body.snapshot
 }
 
