@@ -5,9 +5,11 @@ import { getSupabaseAdminClient } from '../_lib/supabase.js'
 
 interface PartyInviteBody {
   sessionId?: string
-  toUserId?: string
+  toDisplayName?: string
   ttlMinutes?: number
 }
+
+const normalizeDisplayName = (value: string): string => value.trim().replace(/\s+/g, ' ').toLowerCase()
 
 const DEFAULT_TTL_MINUTES = 30
 
@@ -39,9 +41,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const body = await readJsonBody<PartyInviteBody>(req)
   const sessionId = (body.sessionId ?? '').trim()
-  const toUserId = (body.toUserId ?? '').trim()
+  const toDisplayName = (body.toDisplayName ?? '').trim()
+  const normalizedToDisplayName = normalizeDisplayName(toDisplayName)
 
-  if (!sessionId || !toUserId) {
+  if (!sessionId || !normalizedToDisplayName) {
     sendJson(res, 400, {
       error: 'INVALID_REQUEST',
     })
@@ -50,6 +53,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const user = await verifyRequestUser(req)
+    const supabase = getSupabaseAdminClient()
+
+    const targetProfileResult = normalizedToDisplayName
+      ? await supabase
+          .from('dice_player_profiles')
+          .select('user_id, display_name')
+          .eq('display_name_normalized', normalizedToDisplayName)
+          .maybeSingle()
+      : { data: null, error: null }
+
+    if (targetProfileResult.error) {
+      throw targetProfileResult.error
+    }
+
+    const toUserId = targetProfileResult.data?.user_id as string | undefined
+    const resolvedToDisplayName =
+      (targetProfileResult.data?.display_name as string | undefined) ??
+      toDisplayName
+
+    if (!toUserId) {
+      sendJson(res, 404, {
+        error: 'PLAYER_NOT_FOUND',
+      })
+      return
+    }
 
     if (toUserId === user.userId) {
       sendJson(res, 400, {
@@ -57,8 +85,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
       return
     }
-
-    const supabase = getSupabaseAdminClient()
 
     const sessionResult = await supabase
       .from('dice_sessions')
@@ -166,8 +192,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       invite: {
         id: insertResult.data.id,
         sessionId: insertResult.data.session_id,
-        fromUserId: insertResult.data.from_user_id,
-        toUserId: insertResult.data.to_user_id,
+        toDisplayName: resolvedToDisplayName,
         status: insertResult.data.status,
         expiresAt: insertResult.data.expires_at,
       },

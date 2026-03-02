@@ -46,7 +46,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .map((invite) => ({
         id: invite.id,
         sessionId: invite.session_id,
-        fromUserId: invite.from_user_id,
         fromDisplayName:
           displayNameByUserId.get(invite.from_user_id as string) ??
           `Pilot-${String(invite.from_user_id ?? '').slice(-4).toUpperCase()}`,
@@ -63,7 +62,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .map((invite) => ({
         id: invite.id,
         sessionId: invite.session_id,
-        toUserId: invite.to_user_id,
         toDisplayName:
           displayNameByUserId.get(invite.to_user_id as string) ??
           `Pilot-${String(invite.to_user_id ?? '').slice(-4).toUpperCase()}`,

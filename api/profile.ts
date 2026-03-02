@@ -33,6 +33,20 @@ const isMissingRelationError = (error: unknown): boolean => {
   return message.includes('relation') && message.includes('does not exist')
 }
 
+const isUniqueViolationError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const typedError = error as SupabaseLikeError
+  if (typedError.code === '23505') {
+    return true
+  }
+
+  const message = `${typedError.message ?? ''} ${typedError.details ?? ''} ${typedError.hint ?? ''}`.toLowerCase()
+  return message.includes('duplicate key') || message.includes('unique constraint')
+}
+
 const containsBlockedTerm = (displayName: string, terms: string[]): boolean => {
   const normalized = displayName.toLowerCase()
   return terms.some((term) => normalized.includes(term.toLowerCase()))
@@ -138,6 +152,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sendJson(res, 503, {
           error: 'PROFILE_STORAGE_UNAVAILABLE',
           detail: 'Profile storage is not ready. Apply docs/sql/multiplayer-match-discovery-supabase.sql and retry.',
+        })
+        return
+      }
+
+      if (isUniqueViolationError(updatedProfile.error)) {
+        sendJson(res, 409, {
+          error: 'DISPLAY_NAME_TAKEN',
+          detail: 'Display name is already in use. Try a different name.',
         })
         return
       }

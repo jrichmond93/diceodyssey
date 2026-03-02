@@ -56,6 +56,7 @@ class FakeSupabaseQuery {
   private mode: 'select' | 'update' | 'delete' = 'select'
   private updatePatch: DbRow = {}
   private pendingResult: DbRow[] | null = null
+  private pendingError: DbRow | null = null
 
   constructor(
     private table: TableName,
@@ -81,6 +82,25 @@ class FakeSupabaseQuery {
     const touched: DbRow[] = []
 
     rows.forEach((row) => {
+      if (this.table === 'dice_player_profiles') {
+        const normalized = row.display_name_normalized
+        if (typeof normalized === 'string') {
+          const conflicting = this.db[this.table].find(
+            (candidate) =>
+              candidate.display_name_normalized === normalized &&
+              candidate.user_id !== row.user_id,
+          )
+
+          if (conflicting) {
+            this.pendingError = {
+              code: '23505',
+              message: 'duplicate key value violates unique constraint',
+            }
+            return
+          }
+        }
+      }
+
       if (conflictKey) {
         const existing = this.db[this.table].find((candidate) => candidate[conflictKey] === row[conflictKey])
         if (existing) {
@@ -180,6 +200,10 @@ class FakeSupabaseQuery {
   }
 
   private execute() {
+    if (this.pendingError) {
+      return { data: null, error: this.pendingError }
+    }
+
     if (this.pendingResult) {
       return { data: this.pendingResult, error: null }
     }
@@ -210,6 +234,11 @@ class FakeSupabaseQuery {
 
   async single() {
     const result = this.execute()
+
+    if (result.error) {
+      return { data: null, error: result.error }
+    }
+
     const first = Array.isArray(result.data) ? result.data[0] : result.data
 
     if (!first) {
@@ -221,6 +250,10 @@ class FakeSupabaseQuery {
 
   async maybeSingle() {
     const result = this.execute()
+    if (result.error) {
+      return { data: null, error: result.error }
+    }
+
     const first = Array.isArray(result.data) ? result.data[0] : result.data
     return { data: first ?? null, error: null }
   }
@@ -865,6 +898,30 @@ describe('Phase 3 API lifecycle', () => {
     expect((profileRes.getResult().payload as { error?: string }).error).toBe('DISPLAY_NAME_NOT_ALLOWED')
   })
 
+  it('rejects duplicate display names with DISPLAY_NAME_TAKEN', async () => {
+    db.dice_player_profiles.push({
+      user_id: 'auth0|u2',
+      display_name: 'Captain Nova',
+      display_name_normalized: 'captain nova',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+
+    const profileRes = createMockRes()
+    await profileHandler(
+      createMockReq({
+        method: 'PUT',
+        body: {
+          displayName: 'Captain Nova',
+        },
+      }),
+      profileRes,
+    )
+
+    expect(profileRes.getResult().statusCode).toBe(409)
+    expect((profileRes.getResult().payload as { error?: string }).error).toBe('DISPLAY_NAME_TAKEN')
+  })
+
   it('uses readable display name instead of raw provider subject in seat metadata', async () => {
     verifyRequestUserMock.mockResolvedValueOnce({
       userId: 'auth0|raw-subject-123',
@@ -881,11 +938,28 @@ describe('Phase 3 API lifecycle', () => {
   })
 
   it('supports friend request -> accept -> list lifecycle', async () => {
+    db.dice_player_profiles.push(
+      {
+        user_id: 'auth0|u1',
+        display_name: 'Pilot One',
+        display_name_normalized: 'pilot one',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      {
+        user_id: 'auth0|u2',
+        display_name: 'Pilot Two',
+        display_name_normalized: 'pilot two',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    )
+
     verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u1', subject: 'auth0|u1' })
 
     const requestRes = createMockRes()
     await friendRequestHandler(
-      createMockReq({ method: 'POST', body: { targetUserId: 'auth0|u2' } }),
+      createMockReq({ method: 'POST', body: { targetDisplayName: 'Pilot Two' } }),
       requestRes,
     )
 
@@ -930,6 +1004,23 @@ describe('Phase 3 API lifecycle', () => {
   })
 
   it('allows accepted party invite to join session', async () => {
+    db.dice_player_profiles.push(
+      {
+        user_id: 'auth0|host',
+        display_name: 'Host Pilot',
+        display_name_normalized: 'host pilot',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      {
+        user_id: 'auth0|friend',
+        display_name: 'Friend Pilot',
+        display_name_normalized: 'friend pilot',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    )
+
     verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|host', subject: 'auth0|host', name: 'Host Pilot' })
 
     const queueRes = createMockRes()
@@ -952,7 +1043,7 @@ describe('Phase 3 API lifecycle', () => {
         method: 'POST',
         body: {
           sessionId,
-          toUserId: 'auth0|friend',
+          toDisplayName: 'Friend Pilot',
         },
       }),
       inviteRes,

@@ -79,8 +79,6 @@ interface SocialUserEntry {
 interface PartyInviteEntry {
   id: string
   sessionId: string
-  fromUserId?: string
-  toUserId?: string
   fromDisplayName?: string
   toDisplayName?: string
   status: string
@@ -188,8 +186,8 @@ function App() {
   const [onlineInviteExpiry, setOnlineInviteExpiry] = useState<string | null>(null)
   const [onlineJoinCode, setOnlineJoinCode] = useState('')
   const [joinLinkProcessing, setJoinLinkProcessing] = useState(false)
-  const [friendTargetUserId, setFriendTargetUserId] = useState('')
-  const [partyInviteTargetUserId, setPartyInviteTargetUserId] = useState('')
+  const [friendTargetDisplayName, setFriendTargetDisplayName] = useState('')
+  const [partyInviteTargetDisplayName, setPartyInviteTargetDisplayName] = useState('')
   const [friends, setFriends] = useState<SocialUserEntry[]>([])
   const [incomingFriendRequests, setIncomingFriendRequests] = useState<SocialUserEntry[]>([])
   const [outgoingFriendRequests, setOutgoingFriendRequests] = useState<SocialUserEntry[]>([])
@@ -741,9 +739,9 @@ function App() {
       return
     }
 
-    const targetUserId = friendTargetUserId.trim()
-    if (!targetUserId) {
-      setOnlineError('Enter a target user ID to send a friend request.')
+    const targetDisplayName = friendTargetDisplayName.trim()
+    if (!targetDisplayName) {
+      setOnlineError('Enter a display name to send a friend request.')
       return
     }
 
@@ -757,7 +755,7 @@ function App() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          targetUserId,
+          targetDisplayName,
         }),
       })
 
@@ -765,13 +763,13 @@ function App() {
         throw new Error(await buildApiErrorMessage(response, 'Friend request failed'))
       }
 
-      setFriendTargetUserId('')
-      setOnlineStatusMessage(`Friend request sent to ${targetUserId}.`)
+      setFriendTargetDisplayName('')
+      setOnlineStatusMessage(`Friend request sent to ${targetDisplayName}.`)
       await refreshSocialData()
     } catch (error) {
       setOnlineError(error instanceof Error ? error.message : 'Failed to send friend request.')
     }
-  }, [friendTargetUserId, getApiAccessToken, multiplayerEligibility.eligible, refreshSocialData])
+  }, [friendTargetDisplayName, getApiAccessToken, multiplayerEligibility.eligible, refreshSocialData])
 
   const handleRespondFriendRequest = useCallback(
     async (requesterUserId: string, requesterDisplayName: string, action: 'ACCEPT' | 'DECLINE' | 'BLOCK') => {
@@ -826,14 +824,11 @@ function App() {
       return
     }
 
-    const toUserId = partyInviteTargetUserId.trim()
-    if (!toUserId) {
+    const toDisplayName = partyInviteTargetDisplayName.trim()
+    if (!toDisplayName) {
       setOnlineError('Select a friend to invite.')
       return
     }
-
-    const targetFriend = friends.find((entry) => entry.userId === toUserId)
-    const targetDisplayName = targetFriend?.displayName ?? 'friend'
 
     try {
       setOnlineError(null)
@@ -846,7 +841,7 @@ function App() {
         },
         body: JSON.stringify({
           sessionId: onlineSessionId,
-          toUserId,
+          toDisplayName,
         }),
       })
 
@@ -854,13 +849,13 @@ function App() {
         throw new Error(await buildApiErrorMessage(response, 'Party invite failed'))
       }
 
-      setPartyInviteTargetUserId('')
-      setOnlineStatusMessage(`Party invite sent to ${targetDisplayName}.`)
+      setPartyInviteTargetDisplayName('')
+      setOnlineStatusMessage(`Party invite sent to ${toDisplayName}.`)
       await refreshSocialData()
     } catch (error) {
       setOnlineError(error instanceof Error ? error.message : 'Failed to send party invite.')
     }
-  }, [friends, getApiAccessToken, multiplayerEligibility.eligible, onlineSessionId, partyInviteTargetUserId, refreshSocialData])
+  }, [getApiAccessToken, multiplayerEligibility.eligible, onlineSessionId, partyInviteTargetDisplayName, refreshSocialData])
 
   const handleRespondPartyInvite = useCallback(
     async (inviteId: string, action: 'ACCEPT' | 'DECLINE') => {
@@ -1977,9 +1972,9 @@ function App() {
                 <div className="flex gap-2">
                   <input
                     className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-xs"
-                    value={friendTargetUserId}
-                    onChange={(event) => setFriendTargetUserId(event.target.value)}
-                    placeholder="Friend user ID"
+                    value={friendTargetDisplayName}
+                    onChange={(event) => setFriendTargetDisplayName(event.target.value)}
+                    placeholder="Friend display name"
                   />
                   <button
                     type="button"
@@ -2030,12 +2025,12 @@ function App() {
                 <div className="flex gap-2">
                   <select
                     className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-xs"
-                    value={partyInviteTargetUserId}
-                    onChange={(event) => setPartyInviteTargetUserId(event.target.value)}
+                    value={partyInviteTargetDisplayName}
+                    onChange={(event) => setPartyInviteTargetDisplayName(event.target.value)}
                   >
                     <option value="">Select friend…</option>
                     {friends.map((entry) => (
-                      <option key={entry.userId} value={entry.userId}>
+                      <option key={entry.userId} value={entry.displayName}>
                         {entry.displayName}
                       </option>
                     ))}

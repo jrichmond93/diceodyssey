@@ -4,8 +4,10 @@ import { methodNotAllowed, readJsonBody, sendJson } from '../_lib/http.js'
 import { getSupabaseAdminClient } from '../_lib/supabase.js'
 
 interface FriendRequestBody {
-  targetUserId?: string
+  targetDisplayName?: string
 }
+
+const normalizeDisplayName = (value: string): string => value.trim().replace(/\s+/g, ' ').toLowerCase()
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -14,17 +16,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const body = await readJsonBody<FriendRequestBody>(req)
-  const targetUserId = (body.targetUserId ?? '').trim()
+  const targetDisplayName = (body.targetDisplayName ?? '').trim()
+  const normalizedTargetDisplayName = normalizeDisplayName(targetDisplayName)
 
-  if (!targetUserId) {
+  if (!normalizedTargetDisplayName) {
     sendJson(res, 400, {
-      error: 'INVALID_TARGET_USER',
+      error: 'INVALID_TARGET_DISPLAY_NAME',
     })
     return
   }
 
   try {
     const user = await verifyRequestUser(req)
+    const supabase = getSupabaseAdminClient()
+
+    const targetProfileResult = normalizedTargetDisplayName
+      ? await supabase
+          .from('dice_player_profiles')
+          .select('user_id, display_name')
+          .eq('display_name_normalized', normalizedTargetDisplayName)
+          .maybeSingle()
+      : { data: null, error: null }
+
+    if (targetProfileResult.error) {
+      throw targetProfileResult.error
+    }
+
+    const targetUserId = targetProfileResult.data?.user_id as string | undefined
+    const resolvedDisplayName =
+      (targetProfileResult.data?.display_name as string | undefined) ??
+      targetDisplayName
+
+    if (!targetUserId) {
+      sendJson(res, 404, {
+        error: 'PLAYER_NOT_FOUND',
+      })
+      return
+    }
 
     if (targetUserId === user.userId) {
       sendJson(res, 400, {
@@ -33,7 +61,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return
     }
 
-    const supabase = getSupabaseAdminClient()
     const { data: edges, error: edgeError } = await supabase
       .from('dice_friend_edges')
       .select('requester_user_id, addressee_user_id, status')
@@ -94,6 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         requested: true,
         status: 'accepted',
         userId: targetUserId,
+        displayName: resolvedDisplayName,
       })
       return
     }
@@ -129,6 +157,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       requested: true,
       status: 'pending',
       userId: targetUserId,
+      displayName: resolvedDisplayName,
     })
   } catch (error) {
     if (error instanceof Error && error.message === 'UNAUTHORIZED') {
