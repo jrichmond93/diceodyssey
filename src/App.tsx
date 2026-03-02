@@ -436,11 +436,15 @@ function App() {
       setOnlineStatusMessage(`Joining session ${sessionId}...`)
 
       const token = await getApiAccessToken()
-      const response = await fetch(`/api/sessions/${sessionId}/join`, {
+      const response = await fetch('/api/sessions/join', {
         method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
+        body: JSON.stringify({
+          sessionId,
+        }),
       })
 
       if (!response.ok) {
@@ -1109,7 +1113,6 @@ function App() {
                 value={onlineJoinSessionId}
                 onChange={(event) => setOnlineJoinSessionId(event.target.value)}
                 placeholder="Session ID"
-                disabled={isOnlineMode}
               />
               <button
                 type="button"
@@ -1117,7 +1120,7 @@ function App() {
                 onClick={() => {
                   void handleJoinOnlineMatch()
                 }}
-                disabled={!multiplayerEligibility.eligible || isOnlineMode}
+                disabled={!multiplayerEligibility.eligible}
               >
                 Join
               </button>
