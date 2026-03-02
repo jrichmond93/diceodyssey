@@ -29,11 +29,26 @@ export const fetchSessionSnapshot = async (
   accessToken: string,
 ): Promise<SessionSnapshot> => {
   const fetchJsonSnapshot = async (path: string): Promise<SessionSnapshot> => {
+    console.debug('[multiplayer] snapshot request', {
+      sessionId,
+      path,
+    })
+
     const response = await fetch(path, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
+    })
+
+    console.debug('[multiplayer] snapshot response', {
+      sessionId,
+      path,
+      ok: response.ok,
+      status: response.status,
+      redirected: response.redirected,
+      responseUrl: response.url,
+      contentType: response.headers.get('content-type') ?? '',
     })
 
     if (!response.ok) {
@@ -43,6 +58,12 @@ export const fetchSessionSnapshot = async (
     const contentType = response.headers.get('content-type') ?? ''
     if (!contentType.includes('application/json')) {
       const bodyText = (await response.text()).slice(0, 120)
+      console.error('[multiplayer] snapshot non-json response', {
+        sessionId,
+        path,
+        contentType,
+        preview: bodyText,
+      })
       throw new Error(
         `Snapshot endpoint returned non-JSON content (${contentType || 'unknown'}). Response starts with: ${bodyText}`,
       )
@@ -60,10 +81,19 @@ export const fetchSessionSnapshot = async (
     return await fetchJsonSnapshot(`/api/sessions/${sessionId}`)
   } catch (primaryError) {
     const message = primaryError instanceof Error ? primaryError.message : String(primaryError)
+    console.warn('[multiplayer] primary snapshot path failed', {
+      sessionId,
+      message,
+    })
 
     if (!message.includes('non-JSON')) {
       throw primaryError
     }
+
+    console.warn('[multiplayer] retrying snapshot with fallback path', {
+      sessionId,
+      fallbackPath: `/api/sessions/${sessionId}/index`,
+    })
 
     return await fetchJsonSnapshot(`/api/sessions/${sessionId}/index`)
   }
@@ -92,6 +122,10 @@ export const createSessionRealtimeController = async (
       const snapshot = await fetchSnapshotImpl(sessionId, token)
       callbacks.onSnapshot(snapshot)
     } catch (error) {
+      console.error('[multiplayer] refreshSnapshot failed', {
+        sessionId,
+        error,
+      })
       callbacks.onError?.(error instanceof Error ? error.message : 'Snapshot refresh failed')
     }
   }
