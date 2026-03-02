@@ -2,6 +2,10 @@ import type { Allocation, GameState } from '../types.js'
 
 export type SessionStatus = 'lobby' | 'active' | 'finished' | 'abandoned'
 
+export type MatchStatus = 'lobby' | 'in_progress' | 'between_games' | 'closed'
+
+export type OnlineGameStatus = 'active' | 'finished' | 'abandoned'
+
 export interface SessionPlayerSeat {
   seat: number
   userId: string
@@ -43,6 +47,24 @@ export interface TurnAck {
   requestId: string
 }
 
+export type SessionLifecycleAction = 'RESIGN' | 'LEAVE' | 'REMATCH'
+
+export type SessionLifecycleReason =
+  | 'SESSION_CLOSED'
+  | 'NOT_IN_SESSION'
+  | 'REMATCH_NOT_READY'
+  | 'REMATCH_REQUIRES_PLAYERS'
+
+export interface SessionLifecycleAck {
+  accepted: boolean
+  action: SessionLifecycleAction
+  sessionId: string
+  reason?: SessionLifecycleReason
+  latestVersion?: number
+  requestId: string
+  snapshot?: SessionSnapshot
+}
+
 export type RealtimeEvent =
   | { type: 'SESSION_SNAPSHOT'; snapshot: SessionSnapshot }
   | { type: 'TURN_ACCEPTED'; requestId: string; version: number }
@@ -50,6 +72,9 @@ export type RealtimeEvent =
   | { type: 'PLAYER_JOINED'; userId: string; displayName: string }
   | { type: 'PLAYER_LEFT'; userId: string }
   | { type: 'MATCH_FOUND'; sessionId: string }
+  | { type: 'GAME_ABANDONED'; snapshot: SessionSnapshot; reason: 'resign' | 'leave' }
+  | { type: 'REMATCH_READY'; sessionId: string }
+  | { type: 'REMATCH_STARTED'; snapshot: SessionSnapshot }
   | { type: 'GAME_FINISHED'; snapshot: SessionSnapshot }
 
 export interface MultiplayerIdentity {

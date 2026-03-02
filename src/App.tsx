@@ -28,7 +28,7 @@ import {
 } from './multiplayer/auth'
 import { getAuth0EnvConfig } from './multiplayer/env'
 import { createSessionRealtimeController, type SessionRealtimeController } from './multiplayer/realtime'
-import type { SessionSnapshot, TurnAck } from './multiplayer/types'
+import type { SessionLifecycleAck, SessionSnapshot, TurnAck } from './multiplayer/types'
 
 const HELP_STORAGE_KEY = 'dice-odysseys-help-open'
 const AI_THINK_DELAY_MS = 600
@@ -163,6 +163,7 @@ function App() {
   const [onlineStatusMessage, setOnlineStatusMessage] = useState<string | null>(null)
   const [onlineError, setOnlineError] = useState<string | null>(null)
   const [onlineSubmitting, setOnlineSubmitting] = useState(false)
+  const [onlineLifecycleSubmitting, setOnlineLifecycleSubmitting] = useState(false)
 
   const auth0Audience = useMemo(() => {
     try {
@@ -189,6 +190,7 @@ function App() {
   const resolutionTimersRef = useRef<number[]>([])
   const celebrationTimerRef = useRef<number | null>(null)
   const onlineRealtimeRef = useRef<SessionRealtimeController | null>(null)
+  const onlineSessionGuardRef = useRef<string | null>(null)
   const [helpOpen, setHelpOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
       return false
@@ -359,21 +361,39 @@ function App() {
         await onlineRealtimeRef.current.disconnect()
       }
 
+      onlineSessionGuardRef.current = sessionId
+
       const controller = await createSessionRealtimeController(
         sessionId,
         {
           onEvent: () => {
+            if (onlineSessionGuardRef.current !== sessionId) {
+              return
+            }
+
             setOnlineError(null)
           },
           onSnapshot: (snapshot) => {
+            if (onlineSessionGuardRef.current !== sessionId) {
+              return
+            }
+
             setOnlineSnapshot(snapshot)
             setOnlineStatusMessage(
-              snapshot.gameState.started
+              snapshot.status === 'abandoned'
+                ? `Session ${snapshot.sessionId} has been abandoned.`
+                : snapshot.status === 'finished'
+                  ? `Game finished in session ${snapshot.sessionId}.`
+                  : snapshot.gameState.started
                 ? `Connected to session ${snapshot.sessionId} (v${snapshot.version}).`
                 : `Waiting for players in session ${snapshot.sessionId}...`,
             )
           },
           onError: (message) => {
+            if (onlineSessionGuardRef.current !== sessionId) {
+              return
+            }
+
             setOnlineError(message)
           },
         },
@@ -387,6 +407,21 @@ function App() {
     },
     [getApiAccessToken],
   )
+
+  const detachOnlineSession = useCallback(async () => {
+    onlineSessionGuardRef.current = null
+
+    if (onlineRealtimeRef.current) {
+      await onlineRealtimeRef.current.disconnect()
+      onlineRealtimeRef.current = null
+    }
+
+    setOnlineSnapshot(null)
+    setOnlineSessionId(null)
+    setOnlineJoinSessionId('')
+    setOnlineSubmitting(false)
+    setOnlineLifecycleSubmitting(false)
+  }, [])
 
   const handleStartOnlineMatch = useCallback(async () => {
     if (!multiplayerEligibility.eligible) {
@@ -871,6 +906,109 @@ function App() {
     startResolutionFlow(draftAllocation)
   }
 
+  const callOnlineLifecycleAction = useCallback(
+    async (action: 'RESIGN' | 'LEAVE' | 'REMATCH') => {
+      const sessionId = onlineSessionId
+      if (!sessionId || !multiplayerIdentity) {
+        setOnlineError('You are not connected to an online session.')
+        return
+      }
+
+      const endpoint =
+        action === 'RESIGN'
+          ? '/api/sessions/resign'
+          : action === 'LEAVE'
+            ? '/api/sessions/leave'
+            : '/api/sessions/rematch'
+
+      try {
+        setOnlineLifecycleSubmitting(true)
+        setOnlineError(null)
+
+        const token = await getApiAccessToken()
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            sessionId,
+            clientRequestId: crypto.randomUUID(),
+          }),
+        })
+
+        const raw = await response.text().catch(() => '')
+        let ack: SessionLifecycleAck | null = null
+
+        if (raw) {
+          try {
+            ack = JSON.parse(raw) as SessionLifecycleAck
+          } catch {
+            if (!response.ok) {
+              throw new Error(`${action} failed (${response.status}): ${raw.slice(0, 120)}`)
+            }
+
+            throw new Error(`${action} endpoint returned non-JSON response.`)
+          }
+        }
+
+        if (!response.ok || !ack?.accepted) {
+          setOnlineError(ack?.reason ?? `${action} failed (${response.status}).`)
+          if (response.status === 409 || response.status === 403) {
+            await refreshOnlineSnapshot()
+          }
+          return
+        }
+
+        if (action === 'LEAVE') {
+          await detachOnlineSession()
+          setOnlineStatusMessage('You left the online match.')
+          dispatch({ type: 'NEW_GAME' })
+          return
+        }
+
+        if (ack.snapshot) {
+          setOnlineSnapshot(ack.snapshot)
+        }
+
+        if (action === 'RESIGN') {
+          setOnlineStatusMessage('You resigned the current game.')
+        } else {
+          setOnlineStatusMessage('Rematch started.')
+          setShowDebrief(false)
+          setShowHumanWinCelebration(false)
+          setDraftAllocation(emptyAllocation())
+        }
+      } catch (error) {
+        setOnlineError(error instanceof Error ? error.message : `${action} failed.`)
+      } finally {
+        setOnlineLifecycleSubmitting(false)
+      }
+    },
+    [detachOnlineSession, getApiAccessToken, multiplayerIdentity, onlineSessionId, refreshOnlineSnapshot],
+  )
+
+  const handleResign = useCallback(() => {
+    if (!window.confirm('Resign this online game? This will immediately end the current game.')) {
+      return
+    }
+
+    void callOnlineLifecycleAction('RESIGN')
+  }, [callOnlineLifecycleAction])
+
+  const handleLeaveMatch = useCallback(() => {
+    if (!window.confirm('Leave this online match and return home?')) {
+      return
+    }
+
+    void callOnlineLifecycleAction('LEAVE')
+  }, [callOnlineLifecycleAction])
+
+  const handlePlayAgain = useCallback(() => {
+    void callOnlineLifecycleAction('REMATCH')
+  }, [callOnlineLifecycleAction])
+
   const handleAllocatePreferred = () => {
     if (
       !currentPlayer ||
@@ -908,10 +1046,12 @@ function App() {
     setShowDebrief(false)
     setOnlineError(null)
     setOnlineStatusMessage(null)
+    onlineSessionGuardRef.current = null
     setOnlineSnapshot(null)
     setOnlineSessionId(null)
     setOnlineJoinSessionId('')
     setOnlineSubmitting(false)
+    setOnlineLifecycleSubmitting(false)
 
     if (onlineRealtimeRef.current) {
       void onlineRealtimeRef.current.disconnect()
@@ -1331,9 +1471,10 @@ function App() {
             <button
               type="button"
               className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold leading-tight text-slate-100"
-              onClick={handleNewGame}
+              onClick={isOnlineMode ? handleLeaveMatch : handleNewGame}
+              disabled={onlineLifecycleSubmitting}
             >
-              New Game
+              {isOnlineMode ? 'Leave Match' : 'New Game'}
             </button>
           </div>
         </header>
@@ -1343,6 +1484,18 @@ function App() {
             {onlineSessionId && <p>Online session: {onlineSessionId}</p>}
             {onlineStatusMessage && <p className="text-cyan-200">{onlineStatusMessage}</p>}
             {onlineError && <p className="text-rose-300">{onlineError}</p>}
+            {isOnlineMode && !authoritativeState.winnerId && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  className="rounded-md border border-amber-400 px-3 py-1.5 text-xs font-semibold text-amber-100 disabled:opacity-50"
+                  onClick={handleResign}
+                  disabled={onlineLifecycleSubmitting || onlineSubmitting || !isOnlineActivePlayer}
+                >
+                  Resign
+                </button>
+              </div>
+            )}
           </section>
         )}
 
@@ -1352,14 +1505,51 @@ function App() {
               <p>
                 Winner: {winnerName} ({authoritativeState.winnerReason === 'race' ? 'Race Victory' : 'Survival Victory'})
               </p>
-              <button
-                type="button"
-                className="rounded border border-emerald-300 px-2 py-1 text-xs font-semibold text-emerald-100"
-                onClick={() => setShowDebrief((value) => !value)}
-              >
-                {showDebrief ? 'Hide Story' : 'Show Story'}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded border border-emerald-300 px-2 py-1 text-xs font-semibold text-emerald-100"
+                  onClick={() => setShowDebrief((value) => !value)}
+                >
+                  {showDebrief ? 'Hide Story' : 'Show Story'}
+                </button>
+                {isOnlineMode && (
+                  <>
+                    <button
+                      type="button"
+                      className="rounded border border-cyan-300 px-2 py-1 text-xs font-semibold text-cyan-100 disabled:opacity-50"
+                      onClick={handlePlayAgain}
+                      disabled={onlineLifecycleSubmitting || onlineSubmitting}
+                    >
+                      Play Again
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-100 disabled:opacity-50"
+                      onClick={handleLeaveMatch}
+                      disabled={onlineLifecycleSubmitting || onlineSubmitting}
+                    >
+                      Leave Match
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
+
+            {isOnlineMode && onlineSnapshot && (
+              <div className="rounded-lg border border-emerald-500/40 bg-slate-950/30 p-3 text-xs text-emerald-50">
+                <p className="font-semibold text-emerald-200">Between Games</p>
+                <p className="mt-1">Choose <span className="font-semibold">Play Again</span> to start a rematch in this same match, or <span className="font-semibold">Leave Match</span> to return home.</p>
+                <p className="mt-2 text-emerald-200">Seat readiness:</p>
+                <ul className="mt-1 list-disc space-y-1 pl-5">
+                  {onlineSnapshot.playerSeats.map((seat) => (
+                    <li key={`${seat.userId}-${seat.seat}`}>
+                      {seat.displayName} — {seat.connected ? 'Connected' : 'Disconnected'}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {winnerPlayer && (
               <p className="flex items-center gap-1.5 text-sm text-emerald-100">

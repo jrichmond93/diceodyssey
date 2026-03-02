@@ -129,8 +129,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (
       sessionResult.error ||
       !sessionResult.data ||
-      sessionResult.data.status === 'finished' ||
-      sessionResult.data.status === 'abandoned'
+      (sessionResult.data.status !== 'lobby' && sessionResult.data.status !== 'active')
     ) {
       sendJson(res, 400, {
         accepted: false,

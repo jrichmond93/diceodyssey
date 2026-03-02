@@ -18,6 +18,9 @@ import queueHandler from './matchmaking/queue.js'
 import joinHandler from './sessions/[id]/join.js'
 import sessionHandler from './sessions/[id]/index.js'
 import turnIntentHandler from './sessions/[id]/turn-intent.js'
+import resignHandler from './sessions/resign.js'
+import leaveHandler from './sessions/leave.js'
+import rematchHandler from './sessions/rematch.js'
 
 interface DbRow {
   [key: string]: unknown
@@ -209,6 +212,7 @@ interface SnapshotPayload {
 
 interface TurnAckPayload {
   accepted?: boolean
+  action?: string
   reason?: string
   latestVersion?: number
   snapshot?: SnapshotPayload['snapshot']
@@ -433,6 +437,152 @@ describe('Phase 3 API lifecycle', () => {
     )
     expect(conflictRes.getResult().statusCode).toBe(409)
     expect((conflictRes.getResult().payload as TurnAckPayload).reason).toBe('STALE_VERSION')
+  })
+
+  it('supports resign -> rematch -> leave lifecycle transitions', async () => {
+    const queueRes = createMockRes()
+    await queueHandler(createMockReq({ method: 'POST' }), queueRes)
+    const sessionId = (queueRes.getResult().payload as QueueResponsePayload).sessionId
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u2', subject: 'auth0|u2' })
+    await joinHandler(createMockReq({ method: 'POST', query: { id: sessionId } }), createMockRes())
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u1', subject: 'auth0|u1' })
+    const resignRes = createMockRes()
+    await resignHandler(
+      createMockReq({
+        method: 'POST',
+        body: { sessionId, clientRequestId: 'resign-1' },
+      }),
+      resignRes,
+    )
+
+    const resignResult = resignRes.getResult()
+    expect(resignResult.statusCode).toBe(200)
+    const resignAck = resignResult.payload as TurnAckPayload
+    expect(resignAck.accepted).toBe(true)
+    expect(resignAck.action).toBe('RESIGN')
+    expect(resignAck.snapshot?.status).toBe('finished')
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u2', subject: 'auth0|u2' })
+    const rematchRes = createMockRes()
+    await rematchHandler(
+      createMockReq({
+        method: 'POST',
+        body: { sessionId, clientRequestId: 'rematch-1' },
+      }),
+      rematchRes,
+    )
+
+    const rematchResult = rematchRes.getResult()
+    expect(rematchResult.statusCode).toBe(200)
+    const rematchAck = rematchResult.payload as TurnAckPayload
+    expect(rematchAck.accepted).toBe(true)
+    expect(rematchAck.action).toBe('REMATCH')
+    expect(rematchAck.snapshot?.status).toBe('active')
+    expect(rematchAck.snapshot?.gameState.turn).toBe(1)
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u1', subject: 'auth0|u1' })
+    const leaveRes = createMockRes()
+    await leaveHandler(
+      createMockReq({
+        method: 'POST',
+        body: { sessionId, clientRequestId: 'leave-1' },
+      }),
+      leaveRes,
+    )
+
+    const leaveResult = leaveRes.getResult()
+    expect(leaveResult.statusCode).toBe(200)
+    const leaveAck = leaveResult.payload as TurnAckPayload
+    expect(leaveAck.accepted).toBe(true)
+    expect(leaveAck.action).toBe('LEAVE')
+    expect(leaveAck.snapshot?.status).toBe('abandoned')
+  })
+
+  it('rejects rematch while game is still active', async () => {
+    const queueRes = createMockRes()
+    await queueHandler(createMockReq({ method: 'POST' }), queueRes)
+    const sessionId = (queueRes.getResult().payload as QueueResponsePayload).sessionId
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u2', subject: 'auth0|u2' })
+    await joinHandler(createMockReq({ method: 'POST', query: { id: sessionId } }), createMockRes())
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u1', subject: 'auth0|u1' })
+    const rematchRes = createMockRes()
+    await rematchHandler(
+      createMockReq({
+        method: 'POST',
+        body: { sessionId, clientRequestId: 'rematch-active' },
+      }),
+      rematchRes,
+    )
+
+    expect(rematchRes.getResult().statusCode).toBe(409)
+    expect((rematchRes.getResult().payload as TurnAckPayload).reason).toBe('REMATCH_NOT_READY')
+  })
+
+  it('handles duplicate lifecycle requests safely', async () => {
+    const queueRes = createMockRes()
+    await queueHandler(createMockReq({ method: 'POST' }), queueRes)
+    const sessionId = (queueRes.getResult().payload as QueueResponsePayload).sessionId
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u2', subject: 'auth0|u2' })
+    await joinHandler(createMockReq({ method: 'POST', query: { id: sessionId } }), createMockRes())
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u1', subject: 'auth0|u1' })
+    const resignFirst = createMockRes()
+    await resignHandler(
+      createMockReq({ method: 'POST', body: { sessionId, clientRequestId: 'dup-resign-1' } }),
+      resignFirst,
+    )
+    expect(resignFirst.getResult().statusCode).toBe(200)
+    expect((resignFirst.getResult().payload as TurnAckPayload).accepted).toBe(true)
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u1', subject: 'auth0|u1' })
+    const resignReplay = createMockRes()
+    await resignHandler(
+      createMockReq({ method: 'POST', body: { sessionId, clientRequestId: 'dup-resign-1' } }),
+      resignReplay,
+    )
+    expect(resignReplay.getResult().statusCode).toBe(200)
+    expect((resignReplay.getResult().payload as TurnAckPayload).accepted).toBe(true)
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u2', subject: 'auth0|u2' })
+    const rematchFirst = createMockRes()
+    await rematchHandler(
+      createMockReq({ method: 'POST', body: { sessionId, clientRequestId: 'dup-rematch-1' } }),
+      rematchFirst,
+    )
+    expect(rematchFirst.getResult().statusCode).toBe(200)
+    expect((rematchFirst.getResult().payload as TurnAckPayload).accepted).toBe(true)
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u2', subject: 'auth0|u2' })
+    const rematchReplay = createMockRes()
+    await rematchHandler(
+      createMockReq({ method: 'POST', body: { sessionId, clientRequestId: 'dup-rematch-1' } }),
+      rematchReplay,
+    )
+    expect(rematchReplay.getResult().statusCode).toBe(409)
+    expect((rematchReplay.getResult().payload as TurnAckPayload).reason).toBe('REMATCH_NOT_READY')
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u1', subject: 'auth0|u1' })
+    const leaveFirst = createMockRes()
+    await leaveHandler(
+      createMockReq({ method: 'POST', body: { sessionId, clientRequestId: 'dup-leave-1' } }),
+      leaveFirst,
+    )
+    expect(leaveFirst.getResult().statusCode).toBe(200)
+    expect((leaveFirst.getResult().payload as TurnAckPayload).accepted).toBe(true)
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u1', subject: 'auth0|u1' })
+    const leaveReplay = createMockRes()
+    await leaveHandler(
+      createMockReq({ method: 'POST', body: { sessionId, clientRequestId: 'dup-leave-1' } }),
+      leaveReplay,
+    )
+    expect(leaveReplay.getResult().statusCode).toBe(200)
+    expect((leaveReplay.getResult().payload as TurnAckPayload).accepted).toBe(true)
   })
 
   it('keeps authoritative session progression consistent across multiple alternating turns', async () => {
