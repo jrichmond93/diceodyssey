@@ -404,12 +404,12 @@ function App() {
             setOnlineSnapshot(snapshot)
             setOnlineStatusMessage(
               snapshot.status === 'abandoned'
-                ? `Session ${snapshot.sessionId} has been abandoned.`
+                ? 'Match has been abandoned.'
                 : snapshot.status === 'finished'
-                  ? `Game finished in session ${snapshot.sessionId}.`
+                  ? 'Game finished.'
                   : snapshot.gameState.started
-                ? `Connected to session ${snapshot.sessionId} (v${snapshot.version}).`
-                : `Waiting for players in session ${snapshot.sessionId}...`,
+                ? `Connected (v${snapshot.version}).`
+                : 'Waiting for players...',
             )
           },
           onError: (message) => {
@@ -474,6 +474,28 @@ function App() {
       const body = (await response.json()) as { sessionId: string }
       setOnlineSessionId(body.sessionId)
       await connectOnlineSession(body.sessionId)
+
+      const inviteToken = await getApiAccessToken()
+      const inviteResponse = await fetch('/api/sessions/invite-code', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${inviteToken}`,
+        },
+        body: JSON.stringify({
+          sessionId: body.sessionId,
+        }),
+      })
+
+      if (inviteResponse.ok) {
+        const inviteBody = (await inviteResponse.json()) as {
+          code: string
+          expiresAt?: string
+        }
+        setOnlineInviteCode(inviteBody.code)
+        setOnlineInviteExpiry(inviteBody.expiresAt ?? null)
+        setOnlineStatusMessage(`Invite code ready: ${inviteBody.code}`)
+      }
     } catch (error) {
       setOnlineError(error instanceof Error ? error.message : 'Failed to start online match.')
       setOnlineStatusMessage(null)
@@ -1517,7 +1539,7 @@ function App() {
                 className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-sm"
                 value={onlineJoinSessionId}
                 onChange={(event) => setOnlineJoinSessionId(event.target.value)}
-                placeholder="Session ID"
+                placeholder="Advanced (debug): Session ID"
               />
               <button
                 type="button"
@@ -1527,7 +1549,7 @@ function App() {
                 }}
                 disabled={!multiplayerEligibility.eligible}
               >
-                Join
+                Join ID (debug)
               </button>
             </div>
 
@@ -1604,16 +1626,18 @@ function App() {
             <div className="mt-3 space-y-2 rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-200">
               {onlineSessionId && (
                 <div className="flex flex-wrap items-center gap-2">
-                  <p>Online session: {onlineSessionId}</p>
-                  <button
-                    type="button"
-                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100"
-                    onClick={() => {
-                      void handleCopySessionId()
-                    }}
-                  >
-                    Copy
-                  </button>
+                  {debugEnabled && <p>Online session: {onlineSessionId}</p>}
+                  {debugEnabled && (
+                    <button
+                      type="button"
+                      className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100"
+                      onClick={() => {
+                        void handleCopySessionId()
+                      }}
+                    >
+                      Copy
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100 disabled:opacity-50"
@@ -1789,7 +1813,7 @@ function App() {
 
         {(onlineStatusMessage || onlineError || onlineSessionId) && (
           <section className="space-y-1 rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-200">
-            {onlineSessionId && <p>Online session: {onlineSessionId}</p>}
+            {onlineSessionId && debugEnabled && <p>Online session: {onlineSessionId}</p>}
             {onlineStatusMessage && (
               <p
                 className={
