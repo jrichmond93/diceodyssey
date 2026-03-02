@@ -71,6 +71,23 @@ interface ActiveOpponent {
   fullName?: string
 }
 
+interface SocialUserEntry {
+  userId: string
+  displayName: string
+}
+
+interface PartyInviteEntry {
+  id: string
+  sessionId: string
+  fromUserId?: string
+  toUserId?: string
+  fromDisplayName?: string
+  toDisplayName?: string
+  status: string
+  expiresAt: string
+  createdAt?: string
+}
+
 const allDiceAllocated = (allocation: Allocation): boolean =>
   allocation.move.length + allocation.claim.length + allocation.sabotage.length === 6
 
@@ -171,6 +188,14 @@ function App() {
   const [onlineInviteExpiry, setOnlineInviteExpiry] = useState<string | null>(null)
   const [onlineJoinCode, setOnlineJoinCode] = useState('')
   const [joinLinkProcessing, setJoinLinkProcessing] = useState(false)
+  const [friendTargetUserId, setFriendTargetUserId] = useState('')
+  const [partyInviteTargetUserId, setPartyInviteTargetUserId] = useState('')
+  const [friends, setFriends] = useState<SocialUserEntry[]>([])
+  const [incomingFriendRequests, setIncomingFriendRequests] = useState<SocialUserEntry[]>([])
+  const [outgoingFriendRequests, setOutgoingFriendRequests] = useState<SocialUserEntry[]>([])
+  const [receivedPartyInvites, setReceivedPartyInvites] = useState<PartyInviteEntry[]>([])
+  const [sentPartyInvites, setSentPartyInvites] = useState<PartyInviteEntry[]>([])
+  const [socialLoading, setSocialLoading] = useState(false)
 
   const auth0Audience = useMemo(() => {
     try {
@@ -655,6 +680,232 @@ function App() {
     }
   }, [onlineInviteCode])
 
+  const refreshSocialData = useCallback(async () => {
+    if (!multiplayerEligibility.eligible) {
+      return
+    }
+
+    try {
+      setSocialLoading(true)
+      const token = await getApiAccessToken()
+
+      const [friendsResponse, invitesResponse] = await Promise.all([
+        fetch('/api/friends/list', {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+        fetch('/api/sessions/party-invites', {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      ])
+
+      if (!friendsResponse.ok) {
+        throw new Error(await buildApiErrorMessage(friendsResponse, 'Failed to load friends'))
+      }
+
+      if (!invitesResponse.ok) {
+        throw new Error(await buildApiErrorMessage(invitesResponse, 'Failed to load party invites'))
+      }
+
+      const friendsBody = (await friendsResponse.json()) as {
+        friends?: SocialUserEntry[]
+        incomingRequests?: SocialUserEntry[]
+        outgoingRequests?: SocialUserEntry[]
+      }
+
+      const invitesBody = (await invitesResponse.json()) as {
+        received?: PartyInviteEntry[]
+        sent?: PartyInviteEntry[]
+      }
+
+      setFriends(friendsBody.friends ?? [])
+      setIncomingFriendRequests(friendsBody.incomingRequests ?? [])
+      setOutgoingFriendRequests(friendsBody.outgoingRequests ?? [])
+      setReceivedPartyInvites(invitesBody.received ?? [])
+      setSentPartyInvites(invitesBody.sent ?? [])
+    } catch (error) {
+      setOnlineError(error instanceof Error ? error.message : 'Failed to refresh social data.')
+    } finally {
+      setSocialLoading(false)
+    }
+  }, [getApiAccessToken, multiplayerEligibility.eligible])
+
+  const handleSendFriendRequest = useCallback(async () => {
+    if (!multiplayerEligibility.eligible) {
+      setOnlineError('Login is required before managing friends.')
+      return
+    }
+
+    const targetUserId = friendTargetUserId.trim()
+    if (!targetUserId) {
+      setOnlineError('Enter a target user ID to send a friend request.')
+      return
+    }
+
+    try {
+      setOnlineError(null)
+      const token = await getApiAccessToken()
+      const response = await fetch('/api/friends/request', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          targetUserId,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(await buildApiErrorMessage(response, 'Friend request failed'))
+      }
+
+      setFriendTargetUserId('')
+      setOnlineStatusMessage(`Friend request sent to ${targetUserId}.`)
+      await refreshSocialData()
+    } catch (error) {
+      setOnlineError(error instanceof Error ? error.message : 'Failed to send friend request.')
+    }
+  }, [friendTargetUserId, getApiAccessToken, multiplayerEligibility.eligible, refreshSocialData])
+
+  const handleRespondFriendRequest = useCallback(
+    async (requesterUserId: string, requesterDisplayName: string, action: 'ACCEPT' | 'DECLINE' | 'BLOCK') => {
+      if (!multiplayerEligibility.eligible) {
+        setOnlineError('Login is required before managing friends.')
+        return
+      }
+
+      try {
+        setOnlineError(null)
+        const token = await getApiAccessToken()
+        const response = await fetch('/api/friends/respond', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            requesterUserId,
+            action,
+          }),
+        })
+
+        if (!response.ok) {
+          throw new Error(await buildApiErrorMessage(response, 'Friend response failed'))
+        }
+
+        setOnlineStatusMessage(
+          action === 'ACCEPT'
+            ? `Friend request from ${requesterDisplayName} accepted.`
+            : action === 'DECLINE'
+              ? `Friend request from ${requesterDisplayName} declined.`
+              : `${requesterDisplayName} blocked.`,
+        )
+
+        await refreshSocialData()
+      } catch (error) {
+        setOnlineError(error instanceof Error ? error.message : 'Failed to respond to friend request.')
+      }
+    },
+    [getApiAccessToken, multiplayerEligibility.eligible, refreshSocialData],
+  )
+
+  const handleSendPartyInvite = useCallback(async () => {
+    if (!multiplayerEligibility.eligible) {
+      setOnlineError('Login is required before sending party invites.')
+      return
+    }
+
+    if (!onlineSessionId) {
+      setOnlineError('Start or join an online match before sending party invites.')
+      return
+    }
+
+    const toUserId = partyInviteTargetUserId.trim()
+    if (!toUserId) {
+      setOnlineError('Select a friend to invite.')
+      return
+    }
+
+    const targetFriend = friends.find((entry) => entry.userId === toUserId)
+    const targetDisplayName = targetFriend?.displayName ?? 'friend'
+
+    try {
+      setOnlineError(null)
+      const token = await getApiAccessToken()
+      const response = await fetch('/api/sessions/party-invite', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          sessionId: onlineSessionId,
+          toUserId,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(await buildApiErrorMessage(response, 'Party invite failed'))
+      }
+
+      setPartyInviteTargetUserId('')
+      setOnlineStatusMessage(`Party invite sent to ${targetDisplayName}.`)
+      await refreshSocialData()
+    } catch (error) {
+      setOnlineError(error instanceof Error ? error.message : 'Failed to send party invite.')
+    }
+  }, [friends, getApiAccessToken, multiplayerEligibility.eligible, onlineSessionId, partyInviteTargetUserId, refreshSocialData])
+
+  const handleRespondPartyInvite = useCallback(
+    async (inviteId: string, action: 'ACCEPT' | 'DECLINE') => {
+      if (!multiplayerEligibility.eligible) {
+        setOnlineError('Login is required before responding to party invites.')
+        return
+      }
+
+      try {
+        setOnlineError(null)
+        const token = await getApiAccessToken()
+        const response = await fetch('/api/sessions/party-invite/respond', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            inviteId,
+            action,
+          }),
+        })
+
+        if (!response.ok) {
+          throw new Error(await buildApiErrorMessage(response, 'Party invite response failed'))
+        }
+
+        const body = (await response.json()) as { sessionId?: string }
+
+        if (action === 'ACCEPT' && body.sessionId) {
+          setOnlineSessionId(body.sessionId)
+          await connectOnlineSession(body.sessionId)
+          setOnlineStatusMessage('Party invite accepted. Connected to match.')
+        } else {
+          setOnlineStatusMessage('Party invite declined.')
+        }
+
+        await refreshSocialData()
+      } catch (error) {
+        setOnlineError(error instanceof Error ? error.message : 'Failed to respond to party invite.')
+      }
+    },
+    [connectOnlineSession, getApiAccessToken, multiplayerEligibility.eligible, refreshSocialData],
+  )
+
   useEffect(() => {
     if (pathname !== '/join') {
       return
@@ -686,6 +937,19 @@ function App() {
       }
     })()
   }, [joinCodeFromQuery, joinLinkProcessing, joinOnlineMatchByCode, multiplayerEligibility.eligible, pathname])
+
+  useEffect(() => {
+    if (!multiplayerEligibility.eligible) {
+      setFriends([])
+      setIncomingFriendRequests([])
+      setOutgoingFriendRequests([])
+      setReceivedPartyInvites([])
+      setSentPartyInvites([])
+      return
+    }
+
+    void refreshSocialData()
+  }, [multiplayerEligibility.eligible, refreshSocialData])
 
   const refreshOnlineSnapshot = useCallback(async () => {
     if (!onlineRealtimeRef.current || !onlineSessionId) {
@@ -1690,6 +1954,139 @@ function App() {
                 </p>
               )}
               {onlineError && <p className="text-rose-300">{onlineError}</p>}
+            </div>
+          )}
+
+          {multiplayerEligibility.eligible && (
+            <div className="mt-3 grid gap-3 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-200 md:grid-cols-2">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-semibold text-cyan-200">Friends</p>
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100 disabled:opacity-50"
+                    onClick={() => {
+                      void refreshSocialData()
+                    }}
+                    disabled={socialLoading}
+                  >
+                    {socialLoading ? 'Refreshing…' : 'Refresh'}
+                  </button>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-xs"
+                    value={friendTargetUserId}
+                    onChange={(event) => setFriendTargetUserId(event.target.value)}
+                    placeholder="Friend user ID"
+                  />
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100"
+                    onClick={() => {
+                      void handleSendFriendRequest()
+                    }}
+                  >
+                    Add
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-300">
+                  Friends: {friends.length} • Incoming: {incomingFriendRequests.length} • Outgoing: {outgoingFriendRequests.length}
+                </p>
+
+                <div className="space-y-1">
+                  {incomingFriendRequests.slice(0, 3).map((entry) => (
+                    <div key={`incoming-${entry.userId}`} className="flex items-center justify-between gap-2 rounded border border-slate-700 px-2 py-1">
+                      <span>{entry.displayName}</span>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          className="rounded border border-slate-500 px-2 py-0.5 text-[10px] font-semibold"
+                          onClick={() => {
+                            void handleRespondFriendRequest(entry.userId, entry.displayName, 'ACCEPT')
+                          }}
+                        >
+                          Accept
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded border border-slate-500 px-2 py-0.5 text-[10px] font-semibold"
+                          onClick={() => {
+                            void handleRespondFriendRequest(entry.userId, entry.displayName, 'DECLINE')
+                          }}
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="font-semibold text-cyan-200">Party Invites</p>
+                <div className="flex gap-2">
+                  <select
+                    className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-xs"
+                    value={partyInviteTargetUserId}
+                    onChange={(event) => setPartyInviteTargetUserId(event.target.value)}
+                  >
+                    <option value="">Select friend…</option>
+                    {friends.map((entry) => (
+                      <option key={entry.userId} value={entry.userId}>
+                        {entry.displayName}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100 disabled:opacity-50"
+                    onClick={() => {
+                      void handleSendPartyInvite()
+                    }}
+                    disabled={!onlineSessionId}
+                  >
+                    Invite
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-300">
+                  Received: {receivedPartyInvites.length} • Sent: {sentPartyInvites.length}
+                </p>
+
+                <div className="space-y-1">
+                  {receivedPartyInvites
+                    .filter((invite) => invite.status === 'pending')
+                    .slice(0, 3)
+                    .map((invite) => (
+                      <div key={invite.id} className="flex items-center justify-between gap-2 rounded border border-slate-700 px-2 py-1">
+                        <span>{invite.fromDisplayName ?? 'Unknown'} invited you</span>
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            className="rounded border border-slate-500 px-2 py-0.5 text-[10px] font-semibold"
+                            onClick={() => {
+                              void handleRespondPartyInvite(invite.id, 'ACCEPT')
+                            }}
+                          >
+                            Accept
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded border border-slate-500 px-2 py-0.5 text-[10px] font-semibold"
+                            onClick={() => {
+                              void handleRespondPartyInvite(invite.id, 'DECLINE')
+                            }}
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
             </div>
           )}
 

@@ -26,6 +26,12 @@ import inviteCodeHandler from './sessions/invite-code.js'
 import joinByCodeHandler from './sessions/join-by-code.js'
 import revokeInviteCodeHandler from './sessions/revoke-invite-code.js'
 import profileHandler from './profile.js'
+import friendRequestHandler from './friends/request.js'
+import friendRespondHandler from './friends/respond.js'
+import friendListHandler from './friends/list.js'
+import partyInviteHandler from './sessions/party-invite.js'
+import partyInviteRespondHandler from './sessions/party-invite/respond.js'
+import partyInvitesHandler from './sessions/party-invites.js'
 
 interface DbRow {
   [key: string]: unknown
@@ -40,6 +46,8 @@ type TableName =
   | 'dice_match_invites'
   | 'dice_invite_code_counters'
   | 'dice_blocked_terms'
+  | 'dice_friend_edges'
+  | 'dice_party_invites'
 
 class FakeSupabaseQuery {
   private filters: Array<{ key: string; value: unknown; op: 'eq' | 'gt' | 'lte' }> = []
@@ -356,6 +364,8 @@ describe('Phase 3 API lifecycle', () => {
         },
       ],
       dice_blocked_terms: [],
+      dice_friend_edges: [],
+      dice_party_invites: [],
     }
 
     verifyRequestUserMock.mockReset()
@@ -868,6 +878,135 @@ describe('Phase 3 API lifecycle', () => {
 
     const seat = db.dice_player_seats[0]
     expect(seat?.display_name).toBe('Captain Nova')
+  })
+
+  it('supports friend request -> accept -> list lifecycle', async () => {
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u1', subject: 'auth0|u1' })
+
+    const requestRes = createMockRes()
+    await friendRequestHandler(
+      createMockReq({ method: 'POST', body: { targetUserId: 'auth0|u2' } }),
+      requestRes,
+    )
+
+    expect(requestRes.getResult().statusCode).toBe(200)
+    expect(db.dice_friend_edges).toHaveLength(1)
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u2', subject: 'auth0|u2' })
+
+    const incomingListRes = createMockRes()
+    await friendListHandler(createMockReq({ method: 'GET' }), incomingListRes)
+
+    expect(incomingListRes.getResult().statusCode).toBe(200)
+    const incomingPayload = incomingListRes.getResult().payload as {
+      incomingRequests?: Array<{ userId: string }>
+    }
+    expect(incomingPayload.incomingRequests?.some((entry) => entry.userId === 'auth0|u1')).toBe(true)
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u2', subject: 'auth0|u2' })
+
+    const respondRes = createMockRes()
+    await friendRespondHandler(
+      createMockReq({
+        method: 'POST',
+        body: {
+          requesterUserId: 'auth0|u1',
+          action: 'ACCEPT',
+        },
+      }),
+      respondRes,
+    )
+
+    expect(respondRes.getResult().statusCode).toBe(200)
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u1', subject: 'auth0|u1' })
+
+    const friendListRes = createMockRes()
+    await friendListHandler(createMockReq({ method: 'GET' }), friendListRes)
+
+    expect(friendListRes.getResult().statusCode).toBe(200)
+    const friendPayload = friendListRes.getResult().payload as { friends?: Array<{ userId: string }> }
+    expect(friendPayload.friends?.some((entry) => entry.userId === 'auth0|u2')).toBe(true)
+  })
+
+  it('allows accepted party invite to join session', async () => {
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|host', subject: 'auth0|host', name: 'Host Pilot' })
+
+    const queueRes = createMockRes()
+    await queueHandler(createMockReq({ method: 'POST' }), queueRes)
+    const sessionId = (queueRes.getResult().payload as QueueResponsePayload).sessionId
+
+    db.dice_friend_edges.push({
+      requester_user_id: 'auth0|host',
+      addressee_user_id: 'auth0|friend',
+      status: 'accepted',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|host', subject: 'auth0|host' })
+
+    const inviteRes = createMockRes()
+    await partyInviteHandler(
+      createMockReq({
+        method: 'POST',
+        body: {
+          sessionId,
+          toUserId: 'auth0|friend',
+        },
+      }),
+      inviteRes,
+    )
+
+    expect(inviteRes.getResult().statusCode).toBe(200)
+    const invitePayload = inviteRes.getResult().payload as { invite?: { id: string } }
+    const inviteId = invitePayload.invite?.id
+    expect(typeof inviteId).toBe('string')
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|friend', subject: 'auth0|friend', name: 'Friend Pilot' })
+
+    const acceptRes = createMockRes()
+    await partyInviteRespondHandler(
+      createMockReq({
+        method: 'POST',
+        body: {
+          inviteId,
+          action: 'ACCEPT',
+        },
+      }),
+      acceptRes,
+    )
+
+    expect(acceptRes.getResult().statusCode).toBe(200)
+    const seats = db.dice_player_seats.filter((seat) => seat.session_id === sessionId)
+    expect(seats).toHaveLength(2)
+
+    const inviteRow = db.dice_party_invites.find((row) => row.id === inviteId)
+    expect(inviteRow?.status).toBe('accepted')
+  })
+
+  it('lists received party invites for target user', async () => {
+    db.dice_party_invites.push({
+      id: 'invite-1',
+      session_id: 'session-abc',
+      from_user_id: 'auth0|host',
+      to_user_id: 'auth0|friend',
+      status: 'pending',
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|friend', subject: 'auth0|friend' })
+
+    const listRes = createMockRes()
+    await partyInvitesHandler(createMockReq({ method: 'GET' }), listRes)
+
+    expect(listRes.getResult().statusCode).toBe(200)
+    const payload = listRes.getResult().payload as {
+      received?: Array<{ id: string }>
+    }
+    expect(payload.received?.some((invite) => invite.id === 'invite-1')).toBe(true)
   })
 
   it('meets concurrent-session soak error budget under sustained parallel activity', async () => {
