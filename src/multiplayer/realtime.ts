@@ -78,19 +78,29 @@ export const fetchSessionSnapshot = async (
   }
 
   try {
-    return await fetchJsonSnapshot(`/api/sessions/${sessionId}`)
-  } catch (primaryError) {
-    const message = primaryError instanceof Error ? primaryError.message : String(primaryError)
-    console.warn('[multiplayer] primary snapshot path failed', {
+    return await fetchJsonSnapshot(`/api/sessions/get?id=${encodeURIComponent(sessionId)}`)
+  } catch (firstError) {
+    const firstMessage = firstError instanceof Error ? firstError.message : String(firstError)
+    console.warn('[multiplayer] first snapshot path failed', {
       sessionId,
-      message,
+      message: firstMessage,
     })
 
-    if (!message.includes('non-JSON')) {
-      throw primaryError
+    try {
+      return await fetchJsonSnapshot(`/api/sessions/${sessionId}`)
+    } catch (secondError) {
+      const secondMessage = secondError instanceof Error ? secondError.message : String(secondError)
+      console.warn('[multiplayer] second snapshot path failed', {
+        sessionId,
+        message: secondMessage,
+      })
+
+      if (!secondMessage.includes('non-JSON')) {
+        throw secondError
+      }
     }
 
-    console.warn('[multiplayer] retrying snapshot with fallback path', {
+    console.warn('[multiplayer] retrying snapshot with third fallback path', {
       sessionId,
       fallbackPath: `/api/sessions/${sessionId}/index`,
     })
