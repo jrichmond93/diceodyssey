@@ -125,12 +125,29 @@ export const createSessionRealtimeController = async (
   const fetchSnapshotImpl = dependencies.fetchSnapshot ?? fetchSessionSnapshot
 
   let channel: RealtimeChannel | null = null
+  let latestSnapshotVersion = -1
+
+  const publishSnapshot = (
+    snapshot: SessionSnapshot,
+    options?: {
+      force?: boolean
+    },
+  ) => {
+    const force = options?.force ?? false
+
+    if (!force && snapshot.version <= latestSnapshotVersion) {
+      return
+    }
+
+    latestSnapshotVersion = Math.max(latestSnapshotVersion, snapshot.version)
+    callbacks.onSnapshot(snapshot)
+  }
 
   const refreshSnapshot = async (): Promise<void> => {
     try {
       const token = await dependencies.getAccessToken()
       const snapshot = await fetchSnapshotImpl(sessionId, token)
-      callbacks.onSnapshot(snapshot)
+      publishSnapshot(snapshot, { force: true })
     } catch (error) {
       console.error('[multiplayer] refreshSnapshot failed', {
         sessionId,
@@ -155,7 +172,7 @@ export const createSessionRealtimeController = async (
         payload.type === 'GAME_ABANDONED' ||
         payload.type === 'REMATCH_STARTED'
       ) {
-        callbacks.onSnapshot(payload.snapshot)
+        publishSnapshot(payload.snapshot)
       }
     })
 

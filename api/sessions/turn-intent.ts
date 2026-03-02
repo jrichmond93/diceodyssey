@@ -1,9 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { randomInt } from 'node:crypto'
 import { verifyRequestUser } from '../_lib/auth.js'
+import { getServerEnv } from '../_lib/env.js'
 import { methodNotAllowed, readJsonBody, sendJson } from '../_lib/http.js'
+import { consumeRateLimit } from '../_lib/rateLimit.js'
 import { getSupabaseAdminClient } from '../_lib/supabase.js'
 import { publishSessionRealtimeEventBestEffort } from '../_lib/realtime.js'
+import { createApiRequestContext } from '../_lib/requestContext.js'
 import { mapSessionSnapshot, type SeatRow, type SessionRow as SnapshotSessionRow } from '../_lib/sessionSnapshot.js'
 import { advanceToNextPlayer, applyAllocationToCurrentPlayer } from '../_lib/serverGameState.js'
 import { computeAIAllocation, resolveCurrentPlayerTurn } from '../../src/engine/gameEngine.js'
@@ -97,6 +100,8 @@ const resolveServerAITurns = (state: GameState): GameState => {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const requestContext = createApiRequestContext(req, '/api/sessions/turn-intent')
+
   if (req.method !== 'POST') {
     methodNotAllowed(req, res)
     return
@@ -112,6 +117,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         accepted: false,
         reason: 'SESSION_CLOSED',
         requestId: body.clientRequestId ?? 'unknown',
+        traceId: requestContext.traceId,
+      })
+      return
+    }
+
+    const serverEnv = getServerEnv()
+    const rate = consumeRateLimit(
+      'turn-intent',
+      `${user.userId}:${sessionId}`,
+      serverEnv.turnIntentRateLimitPerMinute,
+      60_000,
+    )
+
+    if (!rate.allowed) {
+      requestContext.logWarn('turn_intent_rate_limited', {
+        userId: user.userId,
+        sessionId,
+        retryAfterSeconds: rate.retryAfterSeconds,
+      })
+
+      sendJson(res, 429, {
+        accepted: false,
+        reason: 'SESSION_CLOSED',
+        detail: 'RATE_LIMITED',
+        retryAfterSeconds: rate.retryAfterSeconds,
+        requestId: body.clientRequestId ?? 'unknown',
+        traceId: requestContext.traceId,
       })
       return
     }
@@ -121,6 +153,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         accepted: false,
         reason: 'NOT_YOUR_TURN',
         requestId: body.clientRequestId ?? 'unknown',
+        traceId: requestContext.traceId,
       })
       return
     }
@@ -130,6 +163,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         accepted: false,
         reason: 'INVALID_ALLOCATION',
         requestId: body.clientRequestId,
+        traceId: requestContext.traceId,
       })
       return
     }
@@ -158,6 +192,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         accepted: true,
         requestId: body.clientRequestId,
         latestVersion: latestSession.data?.version ?? existingIntent.data.session_version,
+        traceId: requestContext.traceId,
       })
       return
     }
@@ -177,6 +212,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         accepted: false,
         reason: 'SESSION_CLOSED',
         requestId: body.clientRequestId,
+        traceId: requestContext.traceId,
       })
       return
     }
@@ -187,6 +223,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         reason: 'STALE_VERSION',
         latestVersion: sessionResult.data.version,
         requestId: body.clientRequestId,
+        traceId: requestContext.traceId,
       })
       return
     }
@@ -199,6 +236,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         reason: 'SESSION_CLOSED',
         requestId: body.clientRequestId,
         detail: 'SESSION_STATE_NOT_READY',
+        traceId: requestContext.traceId,
       })
       return
     }
@@ -211,6 +249,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         accepted: false,
         reason: 'NOT_YOUR_TURN',
         requestId: body.clientRequestId,
+        traceId: requestContext.traceId,
       })
       return
     }
@@ -231,6 +270,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         accepted: false,
         reason: 'NOT_YOUR_TURN',
         requestId: body.clientRequestId,
+        traceId: requestContext.traceId,
       })
       return
     }
@@ -244,6 +284,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           accepted: false,
           reason: 'INVALID_ALLOCATION',
           requestId: body.clientRequestId,
+          traceId: requestContext.traceId,
         })
         return
       }
@@ -254,6 +295,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           accepted: false,
           reason: 'INVALID_ALLOCATION',
           requestId: body.clientRequestId,
+          traceId: requestContext.traceId,
         })
         return
       }
@@ -321,6 +363,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         reason: 'STALE_VERSION',
         latestVersion: body.expectedVersion,
         requestId: body.clientRequestId,
+        traceId: requestContext.traceId,
       })
       return
     }
@@ -405,22 +448,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       latestVersion: sessionUpdate.data.version,
       requestId: body.clientRequestId,
       snapshot,
+      traceId: requestContext.traceId,
     })
   } catch (error) {
     if (error instanceof Error && error.message === 'UNAUTHORIZED') {
+      requestContext.logWarn('turn_intent_unauthorized')
       sendJson(res, 401, {
         accepted: false,
         reason: 'NOT_YOUR_TURN',
         requestId: 'unknown',
+        traceId: requestContext.traceId,
       })
       return
     }
+
+    requestContext.logError('turn_intent_failed', {
+      detail: error instanceof Error ? error.message : 'Unknown error',
+    })
 
     sendJson(res, 500, {
       accepted: false,
       reason: 'SESSION_CLOSED',
       requestId: 'unknown',
       detail: error instanceof Error ? error.message : 'Unknown error',
+      traceId: requestContext.traceId,
     })
   }
 }

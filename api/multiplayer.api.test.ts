@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { __resetRateLimiterForTests } from './_lib/rateLimit.js'
 
 const { verifyRequestUserMock, getSupabaseAdminClientMock } = vi.hoisted(() => ({
   verifyRequestUserMock: vi.fn(),
@@ -249,6 +250,7 @@ describe('Phase 3 API lifecycle', () => {
   let db: Record<TableName, DbRow[]>
 
   beforeEach(() => {
+    __resetRateLimiterForTests()
     db = {
       dice_sessions: [],
       dice_player_seats: [],
@@ -260,6 +262,8 @@ describe('Phase 3 API lifecycle', () => {
     getSupabaseAdminClientMock.mockReset()
     getSupabaseAdminClientMock.mockReturnValue(new FakeSupabaseClient(db))
     verifyRequestUserMock.mockResolvedValue({ userId: 'auth0|u1', subject: 'auth0|u1' })
+    delete process.env.QUEUE_RATE_LIMIT_PER_MINUTE
+    delete process.env.TURN_INTENT_RATE_LIMIT_PER_MINUTE
   })
 
   it('supports queue -> join -> session snapshot path', async () => {
@@ -287,6 +291,19 @@ describe('Phase 3 API lifecycle', () => {
     const snapshot = (getResult.payload as SnapshotPayload).snapshot
     expect(snapshot.sessionId).toBe(sessionId)
     expect(snapshot.playerSeats).toHaveLength(2)
+  })
+
+  it('rate limits queue requests when threshold is exceeded', async () => {
+    process.env.QUEUE_RATE_LIMIT_PER_MINUTE = '1'
+
+    const firstRes = createMockRes()
+    await queueHandler(createMockReq({ method: 'POST', headers: { 'x-forwarded-for': '1.2.3.4' } }), firstRes)
+    expect(firstRes.getResult().statusCode).toBe(200)
+
+    const secondRes = createMockRes()
+    await queueHandler(createMockReq({ method: 'POST', headers: { 'x-forwarded-for': '1.2.3.4' } }), secondRes)
+    expect(secondRes.getResult().statusCode).toBe(429)
+    expect((secondRes.getResult().payload as { error?: string }).error).toBe('RATE_LIMITED')
   })
 
   it('rejects invalid allocation and stale version', async () => {
@@ -651,6 +668,125 @@ describe('Phase 3 API lifecycle', () => {
 
     expect(snapshot.gameState.log.length).toBeGreaterThan(0)
     expect(snapshot.gameState.turnResolutionHistory.length).toBeGreaterThan(0)
+  })
+
+  it('meets concurrent-session soak error budget under sustained parallel activity', async () => {
+    process.env.QUEUE_RATE_LIMIT_PER_MINUTE = '10000'
+    process.env.TURN_INTENT_RATE_LIMIT_PER_MINUTE = '10000'
+
+    verifyRequestUserMock.mockImplementation(async (request: VercelRequest) => {
+      const headerValue = request.headers['x-test-user']
+      const userId = (Array.isArray(headerValue) ? headerValue[0] : headerValue) ?? 'auth0|u1'
+      return { userId, subject: userId }
+    })
+
+    const concurrentSessions = 12
+    const turnsPerSession = 6
+
+    const runSession = async (sessionIndex: number) => {
+      const userA = `auth0|soak-u1-${sessionIndex}`
+      const userB = `auth0|soak-u2-${sessionIndex}`
+
+      const queueRes = createMockRes()
+      await queueHandler(createMockReq({ method: 'POST', headers: { 'x-test-user': userA } }), queueRes)
+
+      const queueResult = queueRes.getResult()
+      if (queueResult.statusCode !== 200) {
+        throw new Error(`queue_failed_${sessionIndex}_${queueResult.statusCode}`)
+      }
+
+      const sessionId = (queueResult.payload as QueueResponsePayload).sessionId
+
+      const joinRes = createMockRes()
+      await joinHandler(
+        createMockReq({ method: 'POST', query: { id: sessionId }, headers: { 'x-test-user': userB } }),
+        joinRes,
+      )
+
+      const joinResult = joinRes.getResult()
+      if (joinResult.statusCode !== 200) {
+        throw new Error(`join_failed_${sessionIndex}_${joinResult.statusCode}`)
+      }
+
+      const sessionRes = createMockRes()
+      await sessionHandler(
+        createMockReq({ method: 'GET', query: { id: sessionId }, headers: { 'x-test-user': userA } }),
+        sessionRes,
+      )
+
+      const sessionResult = sessionRes.getResult()
+      if (sessionResult.statusCode !== 200) {
+        throw new Error(`session_get_failed_${sessionIndex}_${sessionResult.statusCode}`)
+      }
+
+      let snapshot = (sessionResult.payload as SnapshotPayload).snapshot
+      let intentCount = 0
+
+      for (let turn = 0; turn < turnsPerSession; turn += 1) {
+        const gameState = snapshot.gameState
+        const actor = gameState.players[gameState.currentPlayerIndex]
+        const actorUserId = actor.id === 'p1' ? userA : userB
+
+        const intentRes = createMockRes()
+        await turnIntentHandler(
+          createMockReq({
+            method: 'POST',
+            query: { id: sessionId },
+            headers: { 'x-test-user': actorUserId },
+            body: {
+              actorUserId,
+              actorPlayerId: actor.id,
+              expectedVersion: snapshot.version,
+              allocation: {
+                move: actor.dicePool.slice(0, 2).map((die) => die.id),
+                claim: actor.dicePool.slice(2, 4).map((die) => die.id),
+                sabotage: actor.dicePool.slice(4, 6).map((die) => die.id),
+              },
+              clientRequestId: `soak-${sessionIndex}-${turn}`,
+              sentAt: new Date().toISOString(),
+            },
+          }),
+          intentRes,
+        )
+
+        const intentResult = intentRes.getResult()
+        if (intentResult.statusCode !== 200) {
+          throw new Error(`intent_failed_${sessionIndex}_${turn}_${intentResult.statusCode}`)
+        }
+
+        const ack = intentResult.payload as TurnAckPayload
+        if (!ack.accepted || !ack.snapshot) {
+          throw new Error(`intent_not_accepted_${sessionIndex}_${turn}`)
+        }
+
+        snapshot = ack.snapshot
+        intentCount += 1
+      }
+
+      return {
+        sessionId,
+        intentCount,
+        finalVersion: snapshot.version,
+      }
+    }
+
+    const results = await Promise.allSettled(
+      Array.from({ length: concurrentSessions }, (_, index) => runSession(index + 1)),
+    )
+
+    const failed = results.filter((result) => result.status === 'rejected')
+    const successful = results.filter((result) => result.status === 'fulfilled')
+
+    const totalExpectedOperations = concurrentSessions * (3 + turnsPerSession)
+    const failedOperations = failed.length
+    const errorRate = failedOperations / totalExpectedOperations
+
+    expect(successful.length).toBe(concurrentSessions)
+    expect(failed.length).toBe(0)
+    expect(errorRate).toBeLessThanOrEqual(0.01)
+
+    const sessionRows = db.dice_sessions.filter((row) => typeof row.id === 'string')
+    expect(sessionRows.length).toBeGreaterThanOrEqual(concurrentSessions)
   })
 
   it('resolves server AI turns without any client tick', async () => {

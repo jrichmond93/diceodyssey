@@ -77,6 +77,9 @@ Notes:
 - If `dev:api` is not running, multiplayer actions like `Start Online Match` return fetch/proxy errors.
 - `dev:api` uses `vercel.api.local.json` to serve only `api/**/*.ts` handlers from repository root (avoids `vercel dev api` route-discovery issues and avoids frontend rewrite conflicts from `vercel.json`).
 - API runtime now loads `.env.local` automatically; ensure these server vars are set for local multiplayer API: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `AUTH0_DOMAIN` (and optional `AUTH0_AUDIENCE`).
+- Optional Phase 7 hardening vars:
+	- `QUEUE_RATE_LIMIT_PER_MINUTE` (default `20`)
+	- `TURN_INTENT_RATE_LIMIT_PER_MINUTE` (default `120`)
 
 If you previously linked root `vercel dev` and hit Vite import-analysis errors on `index.html`, keep using `npm run dev:api` (API-only) plus `npm run dev` in a second terminal.
 
@@ -169,6 +172,8 @@ Set these in Project Settings → Environment Variables (Production and Preview)
 	- `SUPABASE_SERVICE_ROLE_KEY`
 	- `AUTH0_DOMAIN`
 	- `AUTH0_AUDIENCE`
+	- `QUEUE_RATE_LIMIT_PER_MINUTE` (optional)
+	- `TURN_INTENT_RATE_LIMIT_PER_MINUTE` (optional)
 
 Notes:
 - Ensure `AUTH0_DOMAIN` is host-only (for example: `your-tenant.us.auth0.com`, no `https://`).
