@@ -1,4 +1,4 @@
-import type { Allocation, GameState } from '../types'
+import type { Allocation, GameState } from '../types.js'
 
 export type SessionStatus = 'lobby' | 'active' | 'finished' | 'abandoned'
 

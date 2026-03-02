@@ -9,7 +9,7 @@ import type {
   Planet,
   Player,
   TurnResolutionSnapshot,
-} from '../types'
+} from '../types.js'
 
 const SHRINK_INTERVAL = 5
 const SHRINK_COUNT = 2
@@ -317,7 +317,9 @@ const rollWithAffinity = (
   player: Player,
   rng: EngineRngProvider,
 ): DebugDieRoll[] => {
-  const dieById = new Map(player.dicePool.map((die) => [die.id, die]))
+  const dieById = new Map<string, Player['dicePool'][number]>(
+    player.dicePool.map((die) => [die.id, die] as const),
+  )
 
   return dieIds.map((dieId) => {
     const baseRoll = rng.rollDie()

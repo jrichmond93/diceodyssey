@@ -14,10 +14,10 @@ vi.mock('./_lib/supabase', () => ({
   getSupabaseAdminClient: getSupabaseAdminClientMock,
 }))
 
-import queueHandler from './matchmaking/queue'
-import joinHandler from './sessions/[id]/join'
-import sessionHandler from './sessions/[id]/index'
-import turnIntentHandler from './sessions/[id]/turn-intent'
+import queueHandler from './matchmaking/queue.js'
+import joinHandler from './sessions/[id]/join.js'
+import sessionHandler from './sessions/[id]/index.js'
+import turnIntentHandler from './sessions/[id]/turn-intent.js'
 
 interface DbRow {
   [key: string]: unknown
@@ -180,7 +180,7 @@ type MockReqOverrides = Partial<{
   headers: Record<string, string>
 }>
 
-interface MockResponse extends Partial<VercelResponse> {
+interface MockResponse {
   getResult: () => { statusCode: number; payload: unknown }
 }
 
@@ -222,21 +222,23 @@ const createMockReq = (overrides: MockReqOverrides): VercelRequest =>
     headers: overrides.headers ?? {},
   }) as unknown as VercelRequest
 
-const createMockRes = (): MockResponse => {
+const createMockRes = (): VercelResponse & MockResponse => {
   let statusCode = 200
   let payload: unknown = null
 
-  return {
+  const response = {
     status(code: number) {
       statusCode = code
-      return {
-        json(body: unknown) {
-          payload = body
-        },
-      }
+      return response as unknown as VercelResponse
+    },
+    json(body: unknown) {
+      payload = body
+      return response as unknown as VercelResponse
     },
     getResult: () => ({ statusCode, payload }),
   }
+
+  return response as unknown as VercelResponse & MockResponse
 }
 
 describe('Phase 3 API lifecycle', () => {
