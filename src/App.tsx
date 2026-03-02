@@ -801,7 +801,7 @@ function App() {
           setOnlineError(null)
 
           const token = await getApiAccessToken()
-          const response = await fetch(`/api/sessions/${onlineSessionId}/turn-intent`, {
+          const response = await fetch('/api/sessions/turn-intent', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -818,19 +818,33 @@ function App() {
             }),
           })
 
-          const ack = (await response.json()) as TurnAck & { snapshot?: SessionSnapshot }
-          if (!response.ok || !ack.accepted) {
-            const reason = ack.reason ?? `Turn intent failed (${response.status})`
+          const raw = await response.text().catch(() => '')
+          let ack: (TurnAck & { snapshot?: SessionSnapshot }) | null = null
+
+          if (raw) {
+            try {
+              ack = JSON.parse(raw) as TurnAck & { snapshot?: SessionSnapshot }
+            } catch {
+              if (!response.ok) {
+                throw new Error(`Turn intent failed (${response.status}): ${raw.slice(0, 120)}`)
+              }
+
+              throw new Error('Turn intent endpoint returned non-JSON response.')
+            }
+          }
+
+          if (!response.ok || !ack?.accepted) {
+            const reason = ack?.reason ?? `Turn intent failed (${response.status})`
             setOnlineError(reason)
 
-            if (ack.reason === 'STALE_VERSION' || ack.reason === 'NOT_YOUR_TURN') {
+            if (ack?.reason === 'STALE_VERSION' || ack?.reason === 'NOT_YOUR_TURN') {
               await refreshOnlineSnapshot()
             }
 
             return
           }
 
-          if (ack.snapshot) {
+          if (ack?.snapshot) {
             setOnlineSnapshot(ack.snapshot)
           }
 
