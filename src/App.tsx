@@ -28,7 +28,7 @@ import {
 } from './multiplayer/auth'
 import { getAuth0EnvConfig } from './multiplayer/env'
 import { createSessionRealtimeController, type SessionRealtimeController } from './multiplayer/realtime'
-import type { SessionLifecycleAck, SessionSnapshot, TurnAck } from './multiplayer/types'
+import type { RealtimeEvent, SessionLifecycleAck, SessionSnapshot, TurnAck } from './multiplayer/types'
 
 const HELP_STORAGE_KEY = 'dice-odysseys-help-open'
 const AI_THINK_DELAY_MS = 600
@@ -334,6 +334,11 @@ function App() {
   const isOnlineActivePlayer = Boolean(
     isOnlineMode && onlinePlayerId && currentPlayer && currentPlayer.id === onlinePlayerId,
   )
+  const isOnlineStatusWarning = Boolean(
+    onlineStatusMessage &&
+      (onlineStatusMessage.includes('Opponent left the match.') ||
+        onlineStatusMessage.includes('Match ended because a player left.')),
+  )
 
   const handleLogin = useCallback(() => {
     void loginWithRedirect()
@@ -366,12 +371,22 @@ function App() {
       const controller = await createSessionRealtimeController(
         sessionId,
         {
-          onEvent: () => {
+          onEvent: (event: RealtimeEvent) => {
             if (onlineSessionGuardRef.current !== sessionId) {
               return
             }
 
             setOnlineError(null)
+
+            if (event.type === 'PLAYER_LEFT' && event.userId !== multiplayerIdentity?.userId) {
+              setOnlineStatusMessage('Opponent left the match.')
+              return
+            }
+
+            if (event.type === 'GAME_ABANDONED' && event.reason === 'leave') {
+              setOnlineStatusMessage('Match ended because a player left.')
+              setShowDebrief(true)
+            }
           },
           onSnapshot: (snapshot) => {
             if (onlineSessionGuardRef.current !== sessionId) {
@@ -1356,7 +1371,19 @@ function App() {
                   </button>
                 </div>
               )}
-              {onlineStatusMessage && <p className="text-cyan-200">{onlineStatusMessage}</p>}
+              {onlineStatusMessage && (
+                <p
+                  className={
+                    isOnlineStatusWarning
+                      ? 'rounded-md border border-amber-400/70 bg-amber-900/30 px-2 py-1 font-semibold text-amber-100'
+                      : 'text-cyan-200'
+                  }
+                  role="status"
+                  aria-live="polite"
+                >
+                  {onlineStatusMessage}
+                </p>
+              )}
               {onlineError && <p className="text-rose-300">{onlineError}</p>}
             </div>
           )}
@@ -1482,7 +1509,19 @@ function App() {
         {(onlineStatusMessage || onlineError || onlineSessionId) && (
           <section className="space-y-1 rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-200">
             {onlineSessionId && <p>Online session: {onlineSessionId}</p>}
-            {onlineStatusMessage && <p className="text-cyan-200">{onlineStatusMessage}</p>}
+            {onlineStatusMessage && (
+              <p
+                className={
+                  isOnlineStatusWarning
+                    ? 'rounded-md border border-amber-400/70 bg-amber-900/30 px-2 py-1 font-semibold text-amber-100'
+                    : 'text-cyan-200'
+                }
+                role="status"
+                aria-live="polite"
+              >
+                {onlineStatusMessage}
+              </p>
+            )}
             {onlineError && <p className="text-rose-300">{onlineError}</p>}
             {isOnlineMode && !authoritativeState.winnerId && (
               <div className="pt-1">

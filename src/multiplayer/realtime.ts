@@ -148,7 +148,13 @@ export const createSessionRealtimeController = async (
       }
 
       callbacks.onEvent(payload)
-      if (payload.type === 'SESSION_SNAPSHOT' || payload.type === 'TURN_RESOLVED' || payload.type === 'GAME_FINISHED') {
+      if (
+        payload.type === 'SESSION_SNAPSHOT' ||
+        payload.type === 'TURN_RESOLVED' ||
+        payload.type === 'GAME_FINISHED' ||
+        payload.type === 'GAME_ABANDONED' ||
+        payload.type === 'REMATCH_STARTED'
+      ) {
         callbacks.onSnapshot(payload.snapshot)
       }
     })
