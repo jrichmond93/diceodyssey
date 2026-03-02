@@ -1,4 +1,5 @@
-import { computeAIAllocation, gameReducer, initialGameState } from '../src/reducers/gameReducer'
+import { gameReducer, initialGameState } from '../src/reducers/gameReducer'
+import { computeAIAllocation } from '../src/engine/gameEngine'
 import type { Allocation, GameState } from '../src/types'
 
 const TOTAL_GAMES = 50
@@ -36,6 +37,10 @@ const runSingleGame = (): GameSummary => {
         state.galaxy,
         state.turn,
         state.difficulty,
+        {
+          rollDie: () => Math.floor(Math.random() * 6) + 1,
+          nextFloat: Math.random,
+        },
       )
       state = gameReducer(state, { type: 'ALLOCATE_DICE', payload: allocation })
     }

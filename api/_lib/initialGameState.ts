@@ -1,0 +1,22 @@
+export const initialGameState = {
+  started: false,
+  mode: 'single',
+  players: [],
+  currentPlayerIndex: 0,
+  turn: 1,
+  galaxy: [],
+  difficulty: 'medium',
+  winnerId: undefined,
+  winnerReason: undefined,
+  log: [],
+  debugEnabled: false,
+  animationEnabled: false,
+  debugLog: [],
+  turnResolution: {
+    active: false,
+    stage: 'idle',
+    message: '',
+  },
+  latestTurnResolution: undefined,
+  turnResolutionHistory: [],
+}

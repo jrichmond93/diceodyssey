@@ -3,6 +3,7 @@ import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 import { TouchBackend } from 'react-dnd-touch-backend'
 import { Link, Navigate, useLocation } from 'react-router-dom'
+import { useAuth0 } from '@auth0/auth0-react'
 import { AppFooter } from './components/AppFooter'
 import { DicePool } from './components/DicePool'
 import { GalaxyBoard } from './components/GalaxyBoard'
@@ -16,10 +17,18 @@ import { ContactPage } from './pages/ContactPage'
 import { OpponentBioPage } from './pages/OpponentBioPage'
 import { OpponentsPage } from './pages/OpponentsPage'
 import { emptyAllocation, gameReducer, initialGameState } from './reducers/gameReducer'
-import type { Allocation, Difficulty, GameMode, TurnResolutionPlaybackStage } from './types'
+import type { Allocation, Difficulty, GameMode, GameState, TurnResolutionPlaybackStage } from './types'
 import { findAICharacterBySlug } from './data/aiCharacters'
 import { buildPostGameNarrative } from './utils/buildPostGameNarrative'
 import { preloadDiceAnimationAssets } from './utils/dieAssets'
+import {
+  getMultiplayerEligibility,
+  mapAuthUserToMultiplayerIdentity,
+  type AuthUserProfile,
+} from './multiplayer/auth'
+import { getAuth0EnvConfig } from './multiplayer/env'
+import { createSessionRealtimeController, type SessionRealtimeController } from './multiplayer/realtime'
+import type { SessionSnapshot, TurnAck } from './multiplayer/types'
 
 const HELP_STORAGE_KEY = 'dice-odysseys-help-open'
 const AI_THINK_DELAY_MS = 600
@@ -64,6 +73,26 @@ interface ActiveOpponent {
 const allDiceAllocated = (allocation: Allocation): boolean =>
   allocation.move.length + allocation.claim.length + allocation.sabotage.length === 6
 
+const buildApiErrorMessage = async (response: Response, fallback: string): Promise<string> => {
+  const raw = await response.text().catch(() => '')
+
+  let detail: string | undefined
+  if (raw) {
+    try {
+      const payload = JSON.parse(raw) as { error?: string; detail?: string; reason?: string }
+      detail = payload?.detail ?? payload?.error ?? payload?.reason
+    } catch {
+      detail = raw.trim()
+    }
+  }
+
+  if (!detail) {
+    return `${fallback} (${response.status})`
+  }
+
+  return `${fallback} (${response.status}): ${detail}`
+}
+
 const getNormalizedPathname = (pathname: string): string => {
   if (pathname.length <= 1) {
     return pathname
@@ -83,7 +112,32 @@ const getOpponentBioSlug = (pathname: string): string | undefined => {
   return slug.length > 0 ? slug : undefined
 }
 
+const isGameStateLike = (value: unknown): value is GameState => {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const candidate = value as Partial<GameState>
+  return (
+    typeof candidate.started === 'boolean' &&
+    Array.isArray(candidate.players) &&
+    typeof candidate.currentPlayerIndex === 'number' &&
+    typeof candidate.turn === 'number' &&
+    Array.isArray(candidate.galaxy) &&
+    Boolean(candidate.turnResolution) &&
+    typeof candidate.turnResolution?.active === 'boolean'
+  )
+}
+
 function App() {
+  const {
+    isAuthenticated,
+    isLoading: isAuthLoading,
+    user,
+    loginWithRedirect,
+    logout,
+    getAccessTokenSilently,
+  } = useAuth0()
   const location = useLocation()
   const pathname = getNormalizedPathname(location.pathname)
   const opponentBioSlug = getOpponentBioSlug(pathname)
@@ -103,8 +157,38 @@ function App() {
   const [resolveAnimationVariant, setResolveAnimationVariant] = useState<ResolveAnimationVariant>('rolling')
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
   const [showHumanWinCelebration, setShowHumanWinCelebration] = useState(false)
+  const [onlineSessionId, setOnlineSessionId] = useState<string | null>(null)
+  const [onlineJoinSessionId, setOnlineJoinSessionId] = useState('')
+  const [onlineSnapshot, setOnlineSnapshot] = useState<SessionSnapshot | null>(null)
+  const [onlineStatusMessage, setOnlineStatusMessage] = useState<string | null>(null)
+  const [onlineError, setOnlineError] = useState<string | null>(null)
+  const [onlineSubmitting, setOnlineSubmitting] = useState(false)
+
+  const auth0Audience = useMemo(() => {
+    try {
+      return getAuth0EnvConfig().audience
+    } catch {
+      return undefined
+    }
+  }, [])
+
+  const getApiAccessToken = useCallback(async () => {
+    const token = await getAccessTokenSilently(
+      auth0Audience
+        ? {
+            authorizationParams: {
+              audience: auth0Audience,
+            },
+          }
+        : undefined,
+    )
+
+    return token
+  }, [getAccessTokenSilently, auth0Audience])
+
   const resolutionTimersRef = useRef<number[]>([])
   const celebrationTimerRef = useRef<number | null>(null)
+  const onlineRealtimeRef = useRef<SessionRealtimeController | null>(null)
   const [helpOpen, setHelpOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
       return false
@@ -113,10 +197,13 @@ function App() {
     return window.localStorage.getItem(HELP_STORAGE_KEY) === 'true'
   })
 
-  const currentPlayer = state.players[state.currentPlayerIndex]
+  const authoritativeState =
+    onlineSnapshot && isGameStateLike(onlineSnapshot.gameState) ? onlineSnapshot.gameState : state
+  const isOnlineMode = Boolean(onlineSessionId)
+  const currentPlayer = authoritativeState.players[authoritativeState.currentPlayerIndex]
   const resolveStageDelay = prefersReducedMotion ? REDUCED_MOTION_STAGE_DELAY_MS : RESOLVE_STAGE_DELAY_MS
   const aiThinkDelay = prefersReducedMotion ? REDUCED_MOTION_AI_DELAY_MS : AI_THINK_DELAY_MS
-  const isResolving = state.turnResolution.active
+  const isResolving = authoritativeState.turnResolution.active || onlineSubmitting
   const resolvingMessage =
     playbackStage === 'move'
       ? 'Resolving move rolls...'
@@ -126,7 +213,7 @@ function App() {
           ? 'Resolving sabotage rolls...'
           : playbackStage === 'post'
             ? 'Applying post effects...'
-            : state.turnResolution.message
+            : authoritativeState.turnResolution.message
 
   const clearResolutionTimers = useCallback(() => {
     resolutionTimersRef.current.forEach((timer) => window.clearTimeout(timer))
@@ -139,7 +226,7 @@ function App() {
     }, 0)
 
     return () => window.clearTimeout(timer)
-  }, [state.currentPlayerIndex, state.started])
+  }, [authoritativeState.currentPlayerIndex, authoritativeState.started])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) {
@@ -176,22 +263,22 @@ function App() {
   }, [helpOpen])
 
   useEffect(() => {
-    if (state.winnerId) {
+    if (authoritativeState.winnerId) {
       const timer = window.setTimeout(() => {
         setShowDebrief(true)
       }, 0)
 
       return () => window.clearTimeout(timer)
     }
-  }, [state.winnerId])
+  }, [authoritativeState.winnerId])
 
   useEffect(() => {
-    if (!state.started || typeof window === 'undefined') {
+    if (!authoritativeState.started || typeof window === 'undefined') {
       return
     }
 
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
-  }, [state.started])
+  }, [authoritativeState.started])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -202,22 +289,200 @@ function App() {
   }, [location.pathname])
 
   useEffect(() => {
-    if (!animationEnabled && !state.animationEnabled) {
+    if (!animationEnabled && !authoritativeState.animationEnabled) {
       return
     }
 
     void preloadDiceAnimationAssets()
-  }, [animationEnabled, state.animationEnabled])
+  }, [animationEnabled, authoritativeState.animationEnabled])
 
   const winnerName = useMemo(
-    () => state.players.find((player) => player.id === state.winnerId)?.name,
-    [state.players, state.winnerId],
+    () => authoritativeState.players.find((player) => player.id === authoritativeState.winnerId)?.name,
+    [authoritativeState.players, authoritativeState.winnerId],
   )
 
   const winnerPlayer = useMemo(
-    () => state.players.find((player) => player.id === state.winnerId),
-    [state.players, state.winnerId],
+    () => authoritativeState.players.find((player) => player.id === authoritativeState.winnerId),
+    [authoritativeState.players, authoritativeState.winnerId],
   )
+
+  const multiplayerIdentity = useMemo(
+    () => mapAuthUserToMultiplayerIdentity((user ?? null) as AuthUserProfile | null),
+    [user],
+  )
+
+  const multiplayerEligibility = useMemo(
+    () => getMultiplayerEligibility(isAuthenticated, isAuthLoading),
+    [isAuthenticated, isAuthLoading],
+  )
+
+  const onlinePlayerId = useMemo(() => {
+    if (!onlineSnapshot || !multiplayerIdentity) {
+      return undefined
+    }
+
+    const seat = onlineSnapshot.playerSeats.find((entry) => entry.userId === multiplayerIdentity.userId)
+    if (!seat) {
+      return undefined
+    }
+
+    return `p${seat.seat}`
+  }, [onlineSnapshot, multiplayerIdentity])
+
+  const isOnlineActivePlayer = Boolean(
+    isOnlineMode && onlinePlayerId && currentPlayer && currentPlayer.id === onlinePlayerId,
+  )
+
+  const handleLogin = useCallback(() => {
+    void loginWithRedirect()
+  }, [loginWithRedirect])
+
+  const handleLogout = useCallback(() => {
+    void logout({
+      logoutParams: {
+        returnTo: window.location.origin,
+      },
+    })
+  }, [logout])
+
+  useEffect(() => {
+    return () => {
+      if (onlineRealtimeRef.current) {
+        void onlineRealtimeRef.current.disconnect()
+      }
+    }
+  }, [])
+
+  const connectOnlineSession = useCallback(
+    async (sessionId: string) => {
+      if (onlineRealtimeRef.current) {
+        await onlineRealtimeRef.current.disconnect()
+      }
+
+      const controller = await createSessionRealtimeController(
+        sessionId,
+        {
+          onEvent: () => {
+            setOnlineError(null)
+          },
+          onSnapshot: (snapshot) => {
+            setOnlineSnapshot(snapshot)
+            setOnlineStatusMessage(
+              snapshot.gameState.started
+                ? `Connected to session ${snapshot.sessionId} (v${snapshot.version}).`
+                : `Waiting for players in session ${snapshot.sessionId}...`,
+            )
+          },
+          onError: (message) => {
+            setOnlineError(message)
+          },
+        },
+        {
+          getAccessToken: () => getApiAccessToken(),
+        },
+      )
+
+      onlineRealtimeRef.current = controller
+      await controller.refreshSnapshot()
+    },
+    [getApiAccessToken],
+  )
+
+  const handleStartOnlineMatch = useCallback(async () => {
+    if (!multiplayerEligibility.eligible) {
+      setOnlineError('Login is required before starting an online match.')
+      return
+    }
+
+    try {
+      setOnlineError(null)
+      setOnlineStatusMessage('Finding match...')
+
+      const token = await getApiAccessToken()
+      const response = await fetch('/api/matchmaking/queue', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(await buildApiErrorMessage(response, 'Queue failed'))
+      }
+
+      const body = (await response.json()) as { sessionId: string }
+      setOnlineSessionId(body.sessionId)
+      await connectOnlineSession(body.sessionId)
+    } catch (error) {
+      setOnlineError(error instanceof Error ? error.message : 'Failed to start online match.')
+      setOnlineStatusMessage(null)
+    }
+  }, [connectOnlineSession, getApiAccessToken, multiplayerEligibility.eligible])
+
+  const handleJoinOnlineMatch = useCallback(async () => {
+    if (!multiplayerEligibility.eligible) {
+      setOnlineError('Login is required before joining an online match.')
+      return
+    }
+
+    const sessionId = onlineJoinSessionId.trim()
+    if (!sessionId) {
+      setOnlineError('Enter a session ID to join.')
+      return
+    }
+
+    try {
+      setOnlineError(null)
+      setOnlineStatusMessage(`Joining session ${sessionId}...`)
+
+      const token = await getApiAccessToken()
+      const response = await fetch(`/api/sessions/${sessionId}/join`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(await buildApiErrorMessage(response, 'Join failed'))
+      }
+
+      setOnlineSessionId(sessionId)
+      await connectOnlineSession(sessionId)
+    } catch (error) {
+      setOnlineError(error instanceof Error ? error.message : 'Failed to join session.')
+      setOnlineStatusMessage(null)
+    }
+  }, [connectOnlineSession, getApiAccessToken, multiplayerEligibility.eligible, onlineJoinSessionId])
+
+  const refreshOnlineSnapshot = useCallback(async () => {
+    if (!onlineRealtimeRef.current || !onlineSessionId) {
+      return
+    }
+
+    try {
+      await onlineRealtimeRef.current.refreshSnapshot()
+      setOnlineError(null)
+      setOnlineStatusMessage(`Connected to session ${onlineSessionId} (snapshot refreshed).`)
+    } catch (error) {
+      setOnlineError(error instanceof Error ? error.message : 'Failed to refresh online session snapshot.')
+    }
+  }, [onlineSessionId])
+
+  const handleCopySessionId = useCallback(async () => {
+    if (!onlineSessionId || typeof navigator === 'undefined' || !navigator.clipboard) {
+      setOnlineError('Clipboard is not available in this environment.')
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(onlineSessionId)
+      setOnlineError(null)
+      setOnlineStatusMessage(`Session ID copied: ${onlineSessionId}`)
+    } catch {
+      setOnlineError('Failed to copy session ID.')
+    }
+  }, [onlineSessionId])
 
   const isTouchDevice = useMemo(() => {
     if (typeof window === 'undefined') {
@@ -242,7 +507,7 @@ function App() {
       celebrationTimerRef.current = null
     }
 
-    if (!state.winnerId || !winnerPlayer || winnerPlayer.isAI) {
+    if (!authoritativeState.winnerId || !winnerPlayer || winnerPlayer.isAI) {
       setShowHumanWinCelebration(false)
       return
     }
@@ -259,28 +524,34 @@ function App() {
         celebrationTimerRef.current = null
       }, celebrationDuration)
     }, celebrationStartDelay)
-  }, [state.winnerId, winnerPlayer, prefersReducedMotion])
+  }, [authoritativeState.winnerId, winnerPlayer, prefersReducedMotion])
 
   const currentRound = useMemo(() => {
-    const playerCount = Math.max(state.players.length, 1)
-    return Math.floor((state.turn - 1) / playerCount) + 1
-  }, [state.players.length, state.turn])
+    const playerCount = Math.max(authoritativeState.players.length, 1)
+    return Math.floor((authoritativeState.turn - 1) / playerCount) + 1
+  }, [authoritativeState.players.length, authoritativeState.turn])
 
   const postGameNarrative = useMemo(
     () =>
       buildPostGameNarrative({
-        players: state.players,
-        log: state.log,
-        winnerId: state.winnerId,
-        winnerReason: state.winnerReason,
-        turn: state.turn,
+        players: authoritativeState.players,
+        log: authoritativeState.log,
+        winnerId: authoritativeState.winnerId,
+        winnerReason: authoritativeState.winnerReason,
+        turn: authoritativeState.turn,
       }),
-    [state.players, state.log, state.winnerId, state.winnerReason, state.turn],
+    [
+      authoritativeState.players,
+      authoritativeState.log,
+      authoritativeState.winnerId,
+      authoritativeState.winnerReason,
+      authoritativeState.turn,
+    ],
   )
 
   const activeOpponents = useMemo(
     () =>
-      state.players.reduce<ActiveOpponent[]>((collected, player) => {
+      authoritativeState.players.reduce<ActiveOpponent[]>((collected, player) => {
         if (!player.isAI || !player.aiCharacterSlug) {
           return collected
         }
@@ -295,24 +566,27 @@ function App() {
 
         return collected
       }, []),
-    [state.players],
+    [authoritativeState.players],
   )
 
   const turnResolutionRoundRecap = useMemo(() => {
-    if (state.turnResolutionHistory.length === 0) {
+    if (authoritativeState.turnResolutionHistory.length === 0) {
       return undefined
     }
 
-    const focusPlayer = state.players.find((player) => !player.isAI) ?? state.players[0]
+    const focusPlayer =
+      authoritativeState.players.find((player) => !player.isAI) ?? authoritativeState.players[0]
     const latestFocusTurnIndex =
       focusPlayer
-        ? state.turnResolutionHistory.findIndex((snapshot) => snapshot.playerId === focusPlayer.id)
+        ? authoritativeState.turnResolutionHistory.findIndex(
+            (snapshot) => snapshot.playerId === focusPlayer.id,
+          )
         : -1
 
     const windowedSnapshots =
       latestFocusTurnIndex >= 0
-        ? state.turnResolutionHistory.slice(0, latestFocusTurnIndex + 1)
-        : state.turnResolutionHistory.slice(0, 1)
+        ? authoritativeState.turnResolutionHistory.slice(0, latestFocusTurnIndex + 1)
+        : authoritativeState.turnResolutionHistory.slice(0, 1)
 
     const chronologicalSnapshots = [...windowedSnapshots].reverse()
 
@@ -351,16 +625,18 @@ function App() {
     })
 
     return lines.join(' ')
-  }, [state.players, state.turnResolutionHistory])
+  }, [authoritativeState.players, authoritativeState.turnResolutionHistory])
 
   const latestHumanTurnResolution = useMemo(() => {
-    const humanPlayer = state.players.find((player) => !player.isAI)
+    const humanPlayer = authoritativeState.players.find((player) => !player.isAI)
     if (!humanPlayer) {
       return undefined
     }
 
-    return state.turnResolutionHistory.find((snapshot) => snapshot.playerId === humanPlayer.id)
-  }, [state.players, state.turnResolutionHistory])
+    return authoritativeState.turnResolutionHistory.find(
+      (snapshot) => snapshot.playerId === humanPlayer.id,
+    )
+  }, [authoritativeState.players, authoritativeState.turnResolutionHistory])
 
   const startResolutionFlow = useCallback((allocation?: Allocation) => {
     if (!state.started || state.winnerId || !currentPlayer || isResolving) {
@@ -441,7 +717,7 @@ function App() {
   ])
 
   useEffect(() => {
-    if (!state.started || state.winnerId || !currentPlayer?.isAI || isResolving) {
+    if (isOnlineMode || !state.started || state.winnerId || !currentPlayer?.isAI || isResolving) {
       return
     }
 
@@ -450,7 +726,7 @@ function App() {
     }, aiThinkDelay)
 
     return () => window.clearTimeout(timer)
-  }, [state.started, state.winnerId, currentPlayer?.id, currentPlayer?.isAI, isResolving, startResolutionFlow, aiThinkDelay])
+  }, [isOnlineMode, state.started, state.winnerId, currentPlayer?.id, currentPlayer?.isAI, isResolving, startResolutionFlow, aiThinkDelay])
 
   const handleStart = () => {
     if (mode === 'hotseat') {
@@ -496,6 +772,75 @@ function App() {
       return
     }
 
+    if (isOnlineMode) {
+      void (async () => {
+        if (!onlineSessionId || !onlineSnapshot || !multiplayerIdentity || !isOnlineActivePlayer) {
+          setOnlineError('You cannot submit a turn right now.')
+          return
+        }
+
+        if (currentPlayer.skippedTurns <= 0 && !allDiceAllocated(draftAllocation)) {
+          return
+        }
+
+        const allocationForIntent: Allocation =
+          currentPlayer.skippedTurns > 0
+            ? {
+                move: [],
+                claim: [],
+                sabotage: [],
+              }
+            : draftAllocation
+
+        try {
+          setOnlineSubmitting(true)
+          setOnlineError(null)
+
+          const token = await getApiAccessToken()
+          const response = await fetch(`/api/sessions/${onlineSessionId}/turn-intent`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              sessionId: onlineSessionId,
+              actorUserId: multiplayerIdentity.userId,
+              actorPlayerId: currentPlayer.id,
+              expectedVersion: onlineSnapshot.version,
+              allocation: allocationForIntent,
+              clientRequestId: crypto.randomUUID(),
+              sentAt: new Date().toISOString(),
+            }),
+          })
+
+          const ack = (await response.json()) as TurnAck & { snapshot?: SessionSnapshot }
+          if (!response.ok || !ack.accepted) {
+            const reason = ack.reason ?? `Turn intent failed (${response.status})`
+            setOnlineError(reason)
+
+            if (ack.reason === 'STALE_VERSION' || ack.reason === 'NOT_YOUR_TURN') {
+              await refreshOnlineSnapshot()
+            }
+
+            return
+          }
+
+          if (ack.snapshot) {
+            setOnlineSnapshot(ack.snapshot)
+          }
+
+          setDraftAllocation(emptyAllocation())
+        } catch (error) {
+          setOnlineError(error instanceof Error ? error.message : 'Failed to submit turn intent.')
+        } finally {
+          setOnlineSubmitting(false)
+        }
+      })()
+
+      return
+    }
+
     if (currentPlayer.skippedTurns > 0) {
       startResolutionFlow()
       return
@@ -509,7 +854,13 @@ function App() {
   }
 
   const handleAllocatePreferred = () => {
-    if (!currentPlayer || currentPlayer.isAI || currentPlayer.skippedTurns > 0 || state.winnerId || isResolving) {
+    if (
+      !currentPlayer ||
+      currentPlayer.isAI ||
+      currentPlayer.skippedTurns > 0 ||
+      authoritativeState.winnerId ||
+      isResolving
+    ) {
       return
     }
 
@@ -537,17 +888,29 @@ function App() {
     setShowResolveAnimation(false)
     setResolveAnimationVariant('rolling')
     setShowDebrief(false)
+    setOnlineError(null)
+    setOnlineStatusMessage(null)
+    setOnlineSnapshot(null)
+    setOnlineSessionId(null)
+    setOnlineJoinSessionId('')
+    setOnlineSubmitting(false)
+
+    if (onlineRealtimeRef.current) {
+      void onlineRealtimeRef.current.disconnect()
+      onlineRealtimeRef.current = null
+    }
+
     dispatch({ type: 'NEW_GAME' })
   }
 
   const handleDownloadDebugLog = () => {
     const payload = {
       exportedAt: new Date().toISOString(),
-      winnerId: state.winnerId,
-      winnerReason: state.winnerReason,
-      players: state.players,
-      turn: state.turn,
-      debugLog: state.debugLog,
+      winnerId: authoritativeState.winnerId,
+      winnerReason: authoritativeState.winnerReason,
+      players: authoritativeState.players,
+      turn: authoritativeState.turn,
+      debugLog: authoritativeState.debugLog,
     }
 
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
@@ -599,7 +962,7 @@ function App() {
     return <Navigate to="/" replace />
   }
 
-  if (!state.started) {
+  if (!authoritativeState.started) {
     return (
       <div className="flex min-h-screen flex-col">
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center p-6">
@@ -719,14 +1082,77 @@ function App() {
             )}
           </div>
 
-          <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-2">
+          <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-2">
             <button
               type="button"
               className="rounded-md bg-cyan-500 px-5 py-2 font-semibold text-slate-950 lg:whitespace-nowrap"
               onClick={handleStart}
+              disabled={isOnlineMode}
             >
               Start Game
             </button>
+
+            <button
+              type="button"
+              className="rounded-md border border-cyan-400 bg-cyan-900/30 px-5 py-2 font-semibold text-cyan-100 lg:whitespace-nowrap disabled:opacity-50"
+              onClick={() => {
+                void handleStartOnlineMatch()
+              }}
+              disabled={!multiplayerEligibility.eligible || isOnlineMode}
+            >
+              Start Online Match
+            </button>
+
+            <div className="flex w-full items-center gap-2 lg:max-w-sm">
+              <input
+                className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-sm"
+                value={onlineJoinSessionId}
+                onChange={(event) => setOnlineJoinSessionId(event.target.value)}
+                placeholder="Session ID"
+                disabled={isOnlineMode}
+              />
+              <button
+                type="button"
+                className="rounded-md border border-slate-500 px-3 py-2 text-sm font-semibold text-slate-100 disabled:opacity-50"
+                onClick={() => {
+                  void handleJoinOnlineMatch()
+                }}
+                disabled={!multiplayerEligibility.eligible || isOnlineMode}
+              >
+                Join
+              </button>
+            </div>
+
+            <div className="rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-200 lg:flex-1">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-semibold text-cyan-200">Multiplayer Access</span>
+                {isAuthenticated ? (
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="rounded-md border border-slate-600 px-2 py-1 text-xs font-semibold text-slate-100"
+                  >
+                    Log out
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleLogin}
+                    disabled={isAuthLoading}
+                    className="rounded-md border border-slate-600 px-2 py-1 text-xs font-semibold text-slate-100 disabled:opacity-50"
+                  >
+                    {isAuthLoading ? 'Checking auth…' : 'Log in'}
+                  </button>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-slate-300">
+                {multiplayerEligibility.eligible
+                  ? `Eligible for multiplayer as ${multiplayerIdentity?.displayName ?? 'Pilot'}.`
+                  : multiplayerEligibility.reason === 'AUTH_LOADING'
+                    ? 'Checking authentication status for multiplayer access.'
+                    : 'Login is required for multiplayer entry in V1. Local play remains available.'}
+              </p>
+            </div>
 
             <label className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-900/60 p-2 text-sm text-slate-200 lg:flex-1">
               <input
@@ -746,6 +1172,37 @@ function App() {
               Enable logging
             </label>
           </div>
+
+          {(onlineStatusMessage || onlineError || onlineSessionId) && (
+            <div className="mt-3 space-y-2 rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-200">
+              {onlineSessionId && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <p>Online session: {onlineSessionId}</p>
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100"
+                    onClick={() => {
+                      void handleCopySessionId()
+                    }}
+                  >
+                    Copy
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100 disabled:opacity-50"
+                    onClick={() => {
+                      void refreshOnlineSnapshot()
+                    }}
+                    disabled={!onlineSessionId}
+                  >
+                    Refresh Snapshot
+                  </button>
+                </div>
+              )}
+              {onlineStatusMessage && <p className="text-cyan-200">{onlineStatusMessage}</p>}
+              {onlineError && <p className="text-rose-300">{onlineError}</p>}
+            </div>
+          )}
 
           <div className="mt-6 grid gap-3 md:grid-cols-3">
             <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
@@ -814,7 +1271,7 @@ function App() {
             <div className="min-w-0">
               <h1 className="text-2xl font-bold text-cyan-200">Dice Odysseys</h1>
               <div className="mt-1 flex flex-wrap items-center gap-2 pr-1 text-sm text-slate-300 md:flex-nowrap md:overflow-x-auto md:whitespace-nowrap">
-                <span className="shrink-0">Round {currentRound} · Turn {state.turn} · Current:</span>
+                <span className="shrink-0">Round {currentRound} · Turn {authoritativeState.turn} · Current:</span>
                 <span className="shrink-0 rounded border border-cyan-300/70 bg-cyan-900/40 px-1.5 py-0.5 font-semibold text-cyan-100">
                   {currentPlayer?.name ?? '—'}
                 </span>
@@ -864,11 +1321,19 @@ function App() {
           </div>
         </header>
 
-        {state.winnerId && (
+        {(onlineStatusMessage || onlineError || onlineSessionId) && (
+          <section className="space-y-1 rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-200">
+            {onlineSessionId && <p>Online session: {onlineSessionId}</p>}
+            {onlineStatusMessage && <p className="text-cyan-200">{onlineStatusMessage}</p>}
+            {onlineError && <p className="text-rose-300">{onlineError}</p>}
+          </section>
+        )}
+
+        {authoritativeState.winnerId && (
           <section className="space-y-3 rounded-xl border border-emerald-400 bg-emerald-900/30 p-4 text-emerald-100">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p>
-                Winner: {winnerName} ({state.winnerReason === 'race' ? 'Race Victory' : 'Survival Victory'})
+                Winner: {winnerName} ({authoritativeState.winnerReason === 'race' ? 'Race Victory' : 'Survival Victory'})
               </p>
               <button
                 type="button"
@@ -952,28 +1417,30 @@ function App() {
 
         <div className={isResolving ? 'pointer-events-none opacity-95' : ''}>
           <GalaxyBoard
-            galaxy={state.galaxy}
-            players={state.players}
+            galaxy={authoritativeState.galaxy}
+            players={authoritativeState.players}
             currentPlayerId={currentPlayer?.id}
             resolving={isResolving}
             playbackStage={playbackStage}
-            resolutionSummary={state.latestTurnResolution}
+            resolutionSummary={authoritativeState.latestTurnResolution}
             prefersReducedMotion={prefersReducedMotion}
           />
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="space-y-4 lg:col-span-2">
-            {currentPlayer && !state.winnerId && currentPlayer.skippedTurns === 0 && (
+            {currentPlayer && !authoritativeState.winnerId && currentPlayer.skippedTurns === 0 && (
               <DicePool
                 dicePool={currentPlayer.dicePool}
                 allocation={draftAllocation}
-                disabled={currentPlayer.isAI || isResolving}
+                disabled={
+                  currentPlayer.isAI || isResolving || (isOnlineMode && !isOnlineActivePlayer)
+                }
                 onAllocationChange={setDraftAllocation}
                 onAllocatePreferred={handleAllocatePreferred}
               />
             )}
-            {currentPlayer && !state.winnerId && currentPlayer.skippedTurns > 0 && !currentPlayer.isAI && (
+            {currentPlayer && !authoritativeState.winnerId && currentPlayer.skippedTurns > 0 && !currentPlayer.isAI && (
               <section className="rounded-xl border border-amber-400 bg-amber-900/20 p-4 text-amber-100">
                 <h2 className="text-lg font-semibold">Turn Skipped</h2>
                 <p className="mt-1 text-sm">
@@ -982,16 +1449,22 @@ function App() {
               </section>
             )}
             <TurnControls
-              canSubmit={Boolean(currentPlayer?.skippedTurns && currentPlayer.skippedTurns > 0) || allDiceAllocated(draftAllocation)}
-              disabled={Boolean(state.winnerId)}
-              isAI={Boolean(currentPlayer?.isAI) && !state.winnerId}
+              canSubmit={
+                Boolean(currentPlayer?.skippedTurns && currentPlayer.skippedTurns > 0) ||
+                allDiceAllocated(draftAllocation)
+              }
+              disabled={
+                Boolean(authoritativeState.winnerId) ||
+                (isOnlineMode && (!isOnlineActivePlayer || onlineSubmitting))
+              }
+              isAI={Boolean(currentPlayer?.isAI) && !authoritativeState.winnerId}
               resolving={isResolving}
               resolvingLabel={resolvingMessage}
               onSubmit={handleEndTurn}
               onReset={() => setDraftAllocation(emptyAllocation())}
             />
           </div>
-          <PlayerStatus players={state.players} currentPlayerId={currentPlayer?.id} />
+          <PlayerStatus players={authoritativeState.players} currentPlayerId={currentPlayer?.id} />
         </div>
 
         {turnResolutionRoundRecap && (
@@ -1002,7 +1475,7 @@ function App() {
         )}
 
         <TurnResolution
-          summary={state.latestTurnResolution}
+          summary={authoritativeState.latestTurnResolution}
           humanSummary={latestHumanTurnResolution}
           resolving={isResolving}
           playbackStage={playbackStage}
@@ -1013,10 +1486,10 @@ function App() {
             <h2 className="text-lg font-semibold text-slate-100">Turn Log</h2>
             <p className="text-xs text-slate-400 lg:max-w-4xl lg:text-right">Read newest entries at top. Badges show round, turn, acting player, and event type. Each card is one resolved turn. Multiple lines in a card are outcomes from that same turn.</p>
           </div>
-          <TurnLog log={state.log} players={state.players} />
+          <TurnLog log={authoritativeState.log} players={authoritativeState.players} />
         </section>
 
-        {state.debugEnabled && (
+        {authoritativeState.debugEnabled && (
           <section className="rounded-xl border border-fuchsia-500/60 bg-fuchsia-950/10 p-4 text-fuchsia-100">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-lg font-semibold">Debug Log</h2>
@@ -1024,7 +1497,7 @@ function App() {
                 type="button"
                 className="rounded border border-fuchsia-300 px-2 py-1 text-xs font-semibold"
                 onClick={handleDownloadDebugLog}
-                disabled={state.debugLog.length === 0}
+                disabled={authoritativeState.debugLog.length === 0}
               >
                 Download JSON
               </button>
@@ -1035,7 +1508,7 @@ function App() {
             <details className="mt-3">
               <summary className="cursor-pointer text-sm font-semibold">Preview latest debug entries</summary>
               <pre className="mt-2 max-h-64 overflow-auto rounded border border-fuchsia-500/30 bg-slate-950/80 p-3 text-xs text-fuchsia-100">
-{JSON.stringify(state.debugLog.slice(-5), null, 2)}
+{JSON.stringify(authoritativeState.debugLog.slice(-5), null, 2)}
               </pre>
             </details>
           </section>
