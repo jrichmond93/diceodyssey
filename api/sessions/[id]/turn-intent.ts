@@ -6,7 +6,7 @@ import { getSupabaseAdminClient } from '../../_lib/supabase.js'
 import { publishSessionRealtimeEventBestEffort } from '../../_lib/realtime.js'
 import { mapSessionSnapshot, type SeatRow, type SessionRow as SnapshotSessionRow } from '../../_lib/sessionSnapshot.js'
 import { advanceToNextPlayer, applyAllocationToCurrentPlayer } from '../../_lib/serverGameState.js'
-import { resolveCurrentPlayerTurn } from '../../../src/engine/gameEngine.js'
+import { computeAIAllocation, resolveCurrentPlayerTurn } from '../../../src/engine/gameEngine.js'
 import type { Allocation, GameState } from '../../../src/types.js'
 
 interface TurnIntentBody {
@@ -52,6 +52,48 @@ const getServerRngProvider = () => ({
   rollDie: () => randomInt(1, 7),
   nextFloat: () => randomInt(0, 1_000_000) / 1_000_000,
 })
+
+const resolveServerAITurns = (state: GameState): GameState => {
+  let nextState = state
+  const maxServerTurns = Math.max(6, state.players.length * 3)
+  let processed = 0
+
+  while (!nextState.winnerId && !nextState.winnerReason && processed < maxServerTurns) {
+    const current = nextState.players[nextState.currentPlayerIndex]
+    if (!current?.isAI) {
+      break
+    }
+
+    let stateForResolution = nextState
+    if (current.skippedTurns <= 0) {
+      const aiAllocation = computeAIAllocation(
+        current,
+        nextState.players,
+        nextState.galaxy,
+        nextState.turn,
+        nextState.difficulty,
+        getServerRngProvider(),
+      )
+
+      const allocated = applyAllocationToCurrentPlayer(nextState, aiAllocation)
+      if (!allocated) {
+        break
+      }
+
+      stateForResolution = allocated
+    }
+
+    const resolved = resolveCurrentPlayerTurn(stateForResolution, {
+      rng: getServerRngProvider(),
+      createLogEntryId: () => crypto.randomUUID(),
+    })
+
+    nextState = resolved.winnerId || resolved.winnerReason ? resolved : advanceToNextPlayer(resolved)
+    processed += 1
+  }
+
+  return nextState
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -223,7 +265,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       createLogEntryId: () => crypto.randomUUID(),
     })
 
-    const postTurnState = resolvedState.winnerId ? resolvedState : advanceToNextPlayer(resolvedState)
+    const afterHumanTurn = resolvedState.winnerId ? resolvedState : advanceToNextPlayer(resolvedState)
+    const postTurnState = resolveServerAITurns(afterHumanTurn)
+
+    const resolvedTurnCount = Math.max(1, postTurnState.turn - sessionGameState.turn)
+    const nextVersion = body.expectedVersion + resolvedTurnCount
 
     const nextSessionStatus: SessionRow['status'] =
       postTurnState.winnerId || postTurnState.winnerReason
@@ -254,7 +300,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .update({
         status: nextSessionStatus,
         game_state: postTurnState,
-        version: body.expectedVersion + 1,
+        version: nextVersion,
         updated_at: now,
       })
       .eq('id', sessionId)
@@ -296,6 +342,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         requestId: body.clientRequestId,
         version: sessionUpdate.data.version,
         status: sessionUpdate.data.status,
+        resolvedTurnCount,
       },
       created_at: now,
     })

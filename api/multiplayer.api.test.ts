@@ -652,4 +652,101 @@ describe('Phase 3 API lifecycle', () => {
     expect(snapshot.gameState.log.length).toBeGreaterThan(0)
     expect(snapshot.gameState.turnResolutionHistory.length).toBeGreaterThan(0)
   })
+
+  it('resolves server AI turns without any client tick', async () => {
+    db.dice_sessions.push({
+      id: 'session-ai-1',
+      status: 'active',
+      version: 5,
+      game_state: {
+        started: true,
+        mode: 'hotseat',
+        players: [
+          {
+            id: 'p1',
+            name: 'Human',
+            isAI: false,
+            shipPos: 0,
+            macGuffins: 0,
+            skippedTurns: 0,
+            skipImmunity: false,
+            defense: 1,
+            dicePool: [
+              { id: 'p1-die-0', color: 'red' },
+              { id: 'p1-die-1', color: 'red' },
+              { id: 'p1-die-2', color: 'blue' },
+              { id: 'p1-die-3', color: 'blue' },
+              { id: 'p1-die-4', color: 'green' },
+              { id: 'p1-die-5', color: 'green' },
+            ],
+          },
+          {
+            id: 'p2',
+            name: 'AI 1',
+            isAI: true,
+            shipPos: 0,
+            macGuffins: 0,
+            skippedTurns: 0,
+            skipImmunity: false,
+            defense: 1,
+            dicePool: [
+              { id: 'p2-die-0', color: 'red' },
+              { id: 'p2-die-1', color: 'red' },
+              { id: 'p2-die-2', color: 'blue' },
+              { id: 'p2-die-3', color: 'blue' },
+              { id: 'p2-die-4', color: 'green' },
+              { id: 'p2-die-5', color: 'green' },
+            ],
+          },
+        ],
+        currentPlayerIndex: 0,
+        turn: 1,
+        galaxy: Array.from({ length: 12 }, (_, index) => ({
+          id: index + 1,
+          face: (index % 4) + 3,
+          claimed: false,
+          revealed: false,
+        })),
+        difficulty: 'medium',
+        log: [],
+        debugEnabled: false,
+        animationEnabled: false,
+        debugLog: [],
+        turnResolution: { active: false, stage: 'idle', message: '' },
+        turnResolutionHistory: [],
+      },
+    })
+
+    db.dice_player_seats.push({ session_id: 'session-ai-1', user_id: 'auth0|u1', seat: 1 })
+
+    const response = createMockRes()
+    await turnIntentHandler(
+      createMockReq({
+        method: 'POST',
+        query: { id: 'session-ai-1' },
+        body: {
+          actorUserId: 'auth0|u1',
+          actorPlayerId: 'p1',
+          expectedVersion: 5,
+          allocation: {
+            move: ['p1-die-2', 'p1-die-3'],
+            claim: ['p1-die-4', 'p1-die-5'],
+            sabotage: ['p1-die-0', 'p1-die-1'],
+          },
+          clientRequestId: 'ai-chain-1',
+          sentAt: new Date().toISOString(),
+        },
+      }),
+      response,
+    )
+
+    expect(response.getResult().statusCode).toBe(200)
+
+    const payload = response.getResult().payload as TurnAckPayload
+    expect(payload.accepted).toBe(true)
+    expect(payload.snapshot).toBeTruthy()
+    expect(payload.snapshot!.gameState.currentPlayerIndex).toBe(0)
+    expect(payload.snapshot!.gameState.turn).toBeGreaterThanOrEqual(3)
+    expect(payload.latestVersion).toBeGreaterThanOrEqual(7)
+  })
 })
