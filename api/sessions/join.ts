@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '../_lib/supabase.js'
 import { publishSessionRealtimeEventBestEffort } from '../_lib/realtime.js'
 import { mapSessionSnapshot, type SeatRow, type SessionRow } from '../_lib/sessionSnapshot.js'
 import { createHotseatGameState } from '../_lib/serverGameState.js'
+import { resolveUserDisplayName } from '../_lib/displayName.js'
 
 interface JoinBody {
   sessionId?: string
@@ -29,6 +30,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const user = await verifyRequestUser(req)
     const supabase = getSupabaseAdminClient()
+    const displayName = await resolveUserDisplayName(supabase, user)
 
     const { data: existingSeat, error: existingSeatError } = await supabase
       .from('dice_player_seats')
@@ -52,6 +54,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         throw seatListError
       }
 
+      if ((seatRows?.length ?? 0) >= 2) {
+        sendJson(res, 409, {
+          error: 'MATCH_FULL',
+        })
+        return
+      }
+
       const nextSeat = Math.max(0, ...(seatRows ?? []).map((row) => row.seat)) + 1
 
       const now = new Date().toISOString()
@@ -59,7 +68,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         session_id: sessionId,
         seat: nextSeat,
         user_id: user.userId,
-        display_name: user.userId,
+        display_name: displayName,
         connected: true,
         is_ai: false,
         created_at: now,
@@ -127,7 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await publishSessionRealtimeEventBestEffort(sessionId, {
         type: 'PLAYER_JOINED',
         userId: user.userId,
-        displayName: user.userId,
+        displayName,
       })
 
       await publishSessionRealtimeEventBestEffort(sessionId, {

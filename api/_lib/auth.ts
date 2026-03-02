@@ -17,6 +17,9 @@ const getBearerToken = (authorizationHeader?: string): string | null => {
 export interface VerifiedUser {
   userId: string
   subject: string
+  name?: string
+  nickname?: string
+  email?: string
 }
 
 export const verifyRequestUser = async (req: {
@@ -42,7 +45,7 @@ export const verifyRequestUser = async (req: {
         issuer,
       }
 
-  let payload: { sub?: string }
+  let payload: { sub?: string; name?: string; nickname?: string; email?: string }
 
   try {
     const verification = await jwtVerify(token, jwks, verifyOptions)
@@ -59,5 +62,8 @@ export const verifyRequestUser = async (req: {
   return {
     userId: subject,
     subject,
+    name: typeof payload.name === 'string' ? payload.name : undefined,
+    nickname: typeof payload.nickname === 'string' ? payload.nickname : undefined,
+    email: typeof payload.email === 'string' ? payload.email : undefined,
   }
 }

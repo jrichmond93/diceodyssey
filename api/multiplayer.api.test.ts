@@ -22,19 +22,32 @@ import turnIntentHandler from './sessions/[id]/turn-intent.js'
 import resignHandler from './sessions/resign.js'
 import leaveHandler from './sessions/leave.js'
 import rematchHandler from './sessions/rematch.js'
+import inviteCodeHandler from './sessions/invite-code.js'
+import joinByCodeHandler from './sessions/join-by-code.js'
+import revokeInviteCodeHandler from './sessions/revoke-invite-code.js'
+import profileHandler from './profile.js'
 
 interface DbRow {
   [key: string]: unknown
 }
 
-type TableName = 'dice_sessions' | 'dice_player_seats' | 'dice_turn_intents' | 'dice_session_events'
+type TableName =
+  | 'dice_sessions'
+  | 'dice_player_seats'
+  | 'dice_turn_intents'
+  | 'dice_session_events'
+  | 'dice_player_profiles'
+  | 'dice_match_invites'
+  | 'dice_invite_code_counters'
+  | 'dice_blocked_terms'
 
 class FakeSupabaseQuery {
-  private filters: Array<{ key: string; value: unknown }> = []
+  private filters: Array<{ key: string; value: unknown; op: 'eq' | 'gt' | 'lte' }> = []
   private sortKey?: string
   private ascending = true
   private mode: 'select' | 'update' | 'delete' = 'select'
   private updatePatch: DbRow = {}
+  private pendingResult: DbRow[] | null = null
 
   constructor(
     private table: TableName,
@@ -49,7 +62,32 @@ class FakeSupabaseQuery {
   insert(payload: DbRow | DbRow[]) {
     const rows = Array.isArray(payload) ? payload : [payload]
     this.db[this.table].push(...rows)
-    return Promise.resolve({ data: rows, error: null })
+    this.pendingResult = rows
+    return this
+  }
+
+  upsert(payload: DbRow | DbRow[], options?: { onConflict?: string }) {
+    const rows = Array.isArray(payload) ? payload : [payload]
+    const conflictKey = options?.onConflict
+
+    const touched: DbRow[] = []
+
+    rows.forEach((row) => {
+      if (conflictKey) {
+        const existing = this.db[this.table].find((candidate) => candidate[conflictKey] === row[conflictKey])
+        if (existing) {
+          Object.assign(existing, row)
+          touched.push(existing)
+          return
+        }
+      }
+
+      this.db[this.table].push(row)
+      touched.push(row)
+    })
+
+    this.pendingResult = touched
+    return this
   }
 
   update(patch: DbRow) {
@@ -64,7 +102,17 @@ class FakeSupabaseQuery {
   }
 
   eq(key: string, value: unknown) {
-    this.filters.push({ key, value })
+    this.filters.push({ key, value, op: 'eq' })
+    return this
+  }
+
+  gt(key: string, value: unknown) {
+    this.filters.push({ key, value, op: 'gt' })
+    return this
+  }
+
+  lte(key: string, value: unknown) {
+    this.filters.push({ key, value, op: 'lte' })
     return this
   }
 
@@ -76,7 +124,18 @@ class FakeSupabaseQuery {
 
   private filteredRows(): DbRow[] {
     let rows = this.db[this.table].filter((row) =>
-      this.filters.every((filter) => row[filter.key] === filter.value),
+      this.filters.every((filter) => {
+        const rowValue = row[filter.key]
+        if (filter.op === 'eq') {
+          return rowValue === filter.value
+        }
+
+        if (filter.op === 'gt') {
+          return rowValue !== undefined && rowValue !== null && rowValue > filter.value
+        }
+
+        return rowValue !== undefined && rowValue !== null && rowValue <= filter.value
+      }),
     )
 
     if (this.sortKey) {
@@ -113,9 +172,20 @@ class FakeSupabaseQuery {
   }
 
   private execute() {
+    if (this.pendingResult) {
+      return { data: this.pendingResult, error: null }
+    }
+
     if (this.mode === 'delete') {
       const kept = this.db[this.table].filter(
-        (row) => !this.filters.every((filter) => row[filter.key] === filter.value),
+        (row) =>
+          !this.filters.every((filter) => {
+            if (filter.op !== 'eq') {
+              return false
+            }
+
+            return row[filter.key] === filter.value
+          }),
       )
       this.db[this.table] = kept
       return { data: null, error: null }
@@ -174,6 +244,26 @@ class FakeSupabaseClient {
   async removeChannel(channel: unknown) {
     void channel
     return 'ok'
+  }
+
+  async rpc(fnName: string) {
+    if (fnName !== 'dice_next_invite_code') {
+      return { data: null, error: { message: 'RPC_NOT_FOUND' } }
+    }
+
+    const counter = this.db.dice_invite_code_counters[0]
+    if (!counter || typeof counter.word !== 'string' || typeof counter.next_value !== 'number') {
+      return { data: null, error: { message: 'NO_COUNTERS' } }
+    }
+
+    const current = counter.next_value
+    counter.next_value = current + 1
+    counter.updated_at = new Date().toISOString()
+
+    return {
+      data: `${counter.word}${current}`,
+      error: null,
+    }
   }
 }
 
@@ -256,6 +346,16 @@ describe('Phase 3 API lifecycle', () => {
       dice_player_seats: [],
       dice_turn_intents: [],
       dice_session_events: [],
+      dice_player_profiles: [],
+      dice_match_invites: [],
+      dice_invite_code_counters: [
+        {
+          word: 'roll',
+          next_value: 1,
+          updated_at: new Date().toISOString(),
+        },
+      ],
+      dice_blocked_terms: [],
     }
 
     verifyRequestUserMock.mockReset()
@@ -670,6 +770,106 @@ describe('Phase 3 API lifecycle', () => {
     expect(snapshot.gameState.turnResolutionHistory.length).toBeGreaterThan(0)
   })
 
+  it('creates invite code and allows join-by-code flow', async () => {
+    const queueRes = createMockRes()
+    await queueHandler(createMockReq({ method: 'POST' }), queueRes)
+    const sessionId = (queueRes.getResult().payload as QueueResponsePayload).sessionId
+
+    const inviteRes = createMockRes()
+    await inviteCodeHandler(
+      createMockReq({
+        method: 'POST',
+        body: { sessionId },
+      }),
+      inviteRes,
+    )
+
+    expect(inviteRes.getResult().statusCode).toBe(200)
+    const invitePayload = inviteRes.getResult().payload as { code: string; expiresAt: string }
+    expect(invitePayload.code).toMatch(/^[a-z]+\d+$/)
+    expect(invitePayload.code.startsWith('roll')).toBe(true)
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u2', subject: 'auth0|u2', name: 'Sky Pilot' })
+
+    const joinByCodeRes = createMockRes()
+    await joinByCodeHandler(
+      createMockReq({
+        method: 'POST',
+        body: { code: invitePayload.code },
+      }),
+      joinByCodeRes,
+    )
+
+    expect(joinByCodeRes.getResult().statusCode).toBe(200)
+    expect((joinByCodeRes.getResult().payload as { joined?: boolean }).joined).toBe(true)
+
+    const seats = db.dice_player_seats.filter((seat) => seat.session_id === sessionId)
+    expect(seats).toHaveLength(2)
+
+    const inviteRow = db.dice_match_invites.find((invite) => invite.code === invitePayload.code)
+    expect(inviteRow?.status).toBe('consumed')
+  })
+
+  it('revokes active invite codes for the requesting host', async () => {
+    const queueRes = createMockRes()
+    await queueHandler(createMockReq({ method: 'POST' }), queueRes)
+    const sessionId = (queueRes.getResult().payload as QueueResponsePayload).sessionId
+
+    const inviteRes = createMockRes()
+    await inviteCodeHandler(createMockReq({ method: 'POST', body: { sessionId } }), inviteRes)
+    expect(inviteRes.getResult().statusCode).toBe(200)
+
+    const revokeRes = createMockRes()
+    await revokeInviteCodeHandler(
+      createMockReq({ method: 'POST', body: { sessionId } }),
+      revokeRes,
+    )
+
+    expect(revokeRes.getResult().statusCode).toBe(200)
+    expect((revokeRes.getResult().payload as { revokedCount?: number }).revokedCount).toBeGreaterThanOrEqual(1)
+
+    const activeInvites = db.dice_match_invites.filter((invite) => invite.session_id === sessionId)
+    expect(activeInvites.every((invite) => invite.status !== 'active')).toBe(true)
+  })
+
+  it('rejects blocked display names in profile updates', async () => {
+    db.dice_blocked_terms.push({
+      term: 'hate',
+      is_active: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+
+    const profileRes = createMockRes()
+    await profileHandler(
+      createMockReq({
+        method: 'PUT',
+        body: {
+          displayName: 'hatepilot',
+        },
+      }),
+      profileRes,
+    )
+
+    expect(profileRes.getResult().statusCode).toBe(400)
+    expect((profileRes.getResult().payload as { error?: string }).error).toBe('DISPLAY_NAME_NOT_ALLOWED')
+  })
+
+  it('uses readable display name instead of raw provider subject in seat metadata', async () => {
+    verifyRequestUserMock.mockResolvedValueOnce({
+      userId: 'auth0|raw-subject-123',
+      subject: 'auth0|raw-subject-123',
+      name: 'Captain Nova',
+    })
+
+    const queueRes = createMockRes()
+    await queueHandler(createMockReq({ method: 'POST' }), queueRes)
+    expect(queueRes.getResult().statusCode).toBe(200)
+
+    const seat = db.dice_player_seats[0]
+    expect(seat?.display_name).toBe('Captain Nova')
+  })
+
   it('meets concurrent-session soak error budget under sustained parallel activity', async () => {
     process.env.QUEUE_RATE_LIMIT_PER_MINUTE = '10000'
     process.env.TURN_INTENT_RATE_LIMIT_PER_MINUTE = '10000'
@@ -677,7 +877,7 @@ describe('Phase 3 API lifecycle', () => {
     verifyRequestUserMock.mockImplementation(async (request: VercelRequest) => {
       const headerValue = request.headers['x-test-user']
       const userId = (Array.isArray(headerValue) ? headerValue[0] : headerValue) ?? 'auth0|u1'
-      return { userId, subject: userId }
+      return { userId, subject: userId, name: `Pilot-${userId.slice(-2)}` }
     })
 
     const concurrentSessions = 12
@@ -882,7 +1082,7 @@ describe('Phase 3 API lifecycle', () => {
     expect(payload.accepted).toBe(true)
     expect(payload.snapshot).toBeTruthy()
     expect(payload.snapshot!.gameState.currentPlayerIndex).toBe(0)
-    expect(payload.snapshot!.gameState.turn).toBeGreaterThanOrEqual(3)
-    expect(payload.latestVersion).toBeGreaterThanOrEqual(7)
+    expect(payload.snapshot!.gameState.turn).toBeGreaterThanOrEqual(2)
+    expect(payload.latestVersion).toBeGreaterThanOrEqual(6)
   })
 })

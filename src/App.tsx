@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 import { TouchBackend } from 'react-dnd-touch-backend'
-import { Link, Navigate, useLocation } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth0 } from '@auth0/auth0-react'
 import { AppFooter } from './components/AppFooter'
 import { DicePool } from './components/DicePool'
@@ -16,6 +16,7 @@ import { AboutPage } from './pages/AboutPage'
 import { ContactPage } from './pages/ContactPage'
 import { OpponentBioPage } from './pages/OpponentBioPage'
 import { OpponentsPage } from './pages/OpponentsPage'
+import { ProfilePage } from './pages/ProfilePage'
 import { emptyAllocation, gameReducer, initialGameState } from './reducers/gameReducer'
 import type { Allocation, Difficulty, GameMode, GameState, TurnResolutionPlaybackStage } from './types'
 import { findAICharacterBySlug } from './data/aiCharacters'
@@ -139,7 +140,9 @@ function App() {
     getAccessTokenSilently,
   } = useAuth0()
   const location = useLocation()
+  const navigate = useNavigate()
   const pathname = getNormalizedPathname(location.pathname)
+  const joinCodeFromQuery = useMemo(() => new URLSearchParams(location.search).get('code')?.trim() ?? '', [location.search])
   const opponentBioSlug = getOpponentBioSlug(pathname)
   const [state, dispatch] = useReducer(gameReducer, initialGameState)
   const [mode, setMode] = useState<GameMode>('single')
@@ -164,6 +167,10 @@ function App() {
   const [onlineError, setOnlineError] = useState<string | null>(null)
   const [onlineSubmitting, setOnlineSubmitting] = useState(false)
   const [onlineLifecycleSubmitting, setOnlineLifecycleSubmitting] = useState(false)
+  const [onlineInviteCode, setOnlineInviteCode] = useState<string | null>(null)
+  const [onlineInviteExpiry, setOnlineInviteExpiry] = useState<string | null>(null)
+  const [onlineJoinCode, setOnlineJoinCode] = useState('')
+  const [joinLinkProcessing, setJoinLinkProcessing] = useState(false)
 
   const auth0Audience = useMemo(() => {
     try {
@@ -191,6 +198,7 @@ function App() {
   const celebrationTimerRef = useRef<number | null>(null)
   const onlineRealtimeRef = useRef<SessionRealtimeController | null>(null)
   const onlineSessionGuardRef = useRef<string | null>(null)
+  const joinLinkHandledRef = useRef<string | null>(null)
   const [helpOpen, setHelpOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
       return false
@@ -434,8 +442,11 @@ function App() {
     setOnlineSnapshot(null)
     setOnlineSessionId(null)
     setOnlineJoinSessionId('')
+    setOnlineJoinCode('')
     setOnlineSubmitting(false)
     setOnlineLifecycleSubmitting(false)
+    setOnlineInviteCode(null)
+    setOnlineInviteExpiry(null)
   }, [])
 
   const handleStartOnlineMatch = useCallback(async () => {
@@ -508,6 +519,151 @@ function App() {
       setOnlineStatusMessage(null)
     }
   }, [connectOnlineSession, getApiAccessToken, multiplayerEligibility.eligible, onlineJoinSessionId])
+
+  const joinOnlineMatchByCode = useCallback(
+    async (codeInput: string, options?: { navigateHome?: boolean }) => {
+      if (!multiplayerEligibility.eligible) {
+        setOnlineError('Login is required before joining an online match.')
+        return false
+      }
+
+      const code = codeInput.trim().toLowerCase()
+      if (!code) {
+        setOnlineError('Enter an invite code to join.')
+        return false
+      }
+
+      try {
+        setOnlineError(null)
+        setOnlineStatusMessage(`Joining with invite code ${code}...`)
+
+        const token = await getApiAccessToken()
+        const response = await fetch('/api/sessions/join-by-code', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            code,
+          }),
+        })
+
+        if (!response.ok) {
+          throw new Error(await buildApiErrorMessage(response, 'Join by invite code failed'))
+        }
+
+        const body = (await response.json()) as { sessionId: string }
+        setOnlineSessionId(body.sessionId)
+        await connectOnlineSession(body.sessionId)
+
+        if (options?.navigateHome) {
+          navigate('/', { replace: true })
+        }
+
+        return true
+      } catch (error) {
+        setOnlineError(error instanceof Error ? error.message : 'Failed to join by invite code.')
+        setOnlineStatusMessage(null)
+        return false
+      }
+    },
+    [connectOnlineSession, getApiAccessToken, multiplayerEligibility.eligible, navigate],
+  )
+
+  const handleCreateInviteCode = useCallback(async () => {
+    if (!multiplayerEligibility.eligible) {
+      setOnlineError('Login is required before creating invite codes.')
+      return
+    }
+
+    if (!onlineSessionId) {
+      setOnlineError('Start or join an online session before creating invite codes.')
+      return
+    }
+
+    try {
+      setOnlineError(null)
+      setOnlineStatusMessage('Creating invite code...')
+
+      const token = await getApiAccessToken()
+      const response = await fetch('/api/sessions/invite-code', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          sessionId: onlineSessionId,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(await buildApiErrorMessage(response, 'Invite code request failed'))
+      }
+
+      const body = (await response.json()) as {
+        code: string
+        expiresAt?: string
+      }
+
+      setOnlineInviteCode(body.code)
+      setOnlineInviteExpiry(body.expiresAt ?? null)
+      setOnlineStatusMessage(`Invite code ready: ${body.code}`)
+    } catch (error) {
+      setOnlineError(error instanceof Error ? error.message : 'Failed to create invite code.')
+      setOnlineStatusMessage(null)
+    }
+  }, [getApiAccessToken, multiplayerEligibility.eligible, onlineSessionId])
+
+  const handleCopyInviteLink = useCallback(async () => {
+    if (!onlineInviteCode || typeof navigator === 'undefined' || !navigator.clipboard) {
+      setOnlineError('Create an invite code before copying an invite link.')
+      return
+    }
+
+    const inviteUrl = `${window.location.origin}/join?code=${encodeURIComponent(onlineInviteCode)}`
+
+    try {
+      await navigator.clipboard.writeText(inviteUrl)
+      setOnlineError(null)
+      setOnlineStatusMessage(`Invite link copied for code ${onlineInviteCode}.`)
+    } catch {
+      setOnlineError('Failed to copy invite link.')
+    }
+  }, [onlineInviteCode])
+
+  useEffect(() => {
+    if (pathname !== '/join') {
+      return
+    }
+
+    const code = joinCodeFromQuery.trim().toLowerCase()
+
+    if (!code) {
+      setOnlineError('Invite link is missing code parameter.')
+      return
+    }
+
+    if (!multiplayerEligibility.eligible || joinLinkProcessing) {
+      return
+    }
+
+    if (joinLinkHandledRef.current === code) {
+      return
+    }
+
+    joinLinkHandledRef.current = code
+
+    void (async () => {
+      setJoinLinkProcessing(true)
+      try {
+        await joinOnlineMatchByCode(code, { navigateHome: true })
+      } finally {
+        setJoinLinkProcessing(false)
+      }
+    })()
+  }, [joinCodeFromQuery, joinLinkProcessing, joinOnlineMatchByCode, multiplayerEligibility.eligible, pathname])
 
   const refreshOnlineSnapshot = useCallback(async () => {
     if (!onlineRealtimeRef.current || !onlineSessionId) {
@@ -1065,8 +1221,11 @@ function App() {
     setOnlineSnapshot(null)
     setOnlineSessionId(null)
     setOnlineJoinSessionId('')
+    setOnlineJoinCode('')
     setOnlineSubmitting(false)
     setOnlineLifecycleSubmitting(false)
+    setOnlineInviteCode(null)
+    setOnlineInviteExpiry(null)
 
     if (onlineRealtimeRef.current) {
       void onlineRealtimeRef.current.disconnect()
@@ -1093,6 +1252,77 @@ function App() {
     anchor.download = `dice-odysseys-debug-${Date.now()}.json`
     anchor.click()
     URL.revokeObjectURL(url)
+  }
+
+  if (pathname === '/join') {
+    const inviteCode = joinCodeFromQuery.trim().toLowerCase()
+
+    return (
+      <div className="flex min-h-screen flex-col">
+        <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center p-6">
+          <section className="rounded-2xl border border-slate-700 bg-slate-950/80 p-6">
+            <h1 className="text-2xl font-bold text-cyan-200">Join Match</h1>
+            <p className="mt-2 text-sm text-slate-300">Use your invite link to join an online match.</p>
+
+            <div className="mt-4 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-sm text-slate-200">
+              <p>
+                Invite code: <span className="font-semibold text-cyan-200">{inviteCode || 'Missing code'}</span>
+              </p>
+            </div>
+
+            {!multiplayerEligibility.eligible ? (
+              <div className="mt-4 space-y-3">
+                <p className="text-sm text-slate-300">Log in to continue with this invite.</p>
+                <button
+                  type="button"
+                  className="rounded-md border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-100"
+                  onClick={() => {
+                    void loginWithRedirect({
+                      authorizationParams: {
+                        redirect_uri: window.location.href,
+                      },
+                    })
+                  }}
+                  disabled={isAuthLoading}
+                >
+                  {isAuthLoading ? 'Checking auth…' : 'Log in to Join'}
+                </button>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                <button
+                  type="button"
+                  className="rounded-md bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50"
+                  onClick={() => {
+                    void joinOnlineMatchByCode(inviteCode, { navigateHome: true })
+                  }}
+                  disabled={!inviteCode || joinLinkProcessing}
+                >
+                  {joinLinkProcessing ? 'Joining…' : 'Join Match'}
+                </button>
+              </div>
+            )}
+
+            {(onlineStatusMessage || onlineError) && (
+              <div className="mt-4 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-xs">
+                {onlineStatusMessage ? <p className="text-cyan-200">{onlineStatusMessage}</p> : null}
+                {onlineError ? <p className="mt-1 text-rose-300">{onlineError}</p> : null}
+              </div>
+            )}
+          </section>
+        </main>
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (pathname === '/profile') {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <ProfilePage />
+        <AppFooter />
+      </div>
+    )
   }
 
   if (pathname === '/about') {
@@ -1163,6 +1393,12 @@ function App() {
                 className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
               >
                 About
+              </Link>
+              <Link
+                to="/profile"
+                className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
+              >
+                Profile
               </Link>
             </div>
           </div>
@@ -1295,6 +1531,25 @@ function App() {
               </button>
             </div>
 
+            <div className="flex w-full items-center gap-2 lg:max-w-sm">
+              <input
+                className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-sm"
+                value={onlineJoinCode}
+                onChange={(event) => setOnlineJoinCode(event.target.value)}
+                placeholder="Invite code (e.g. roll1)"
+              />
+              <button
+                type="button"
+                className="rounded-md border border-slate-500 px-3 py-2 text-sm font-semibold text-slate-100 disabled:opacity-50"
+                onClick={() => {
+                  void joinOnlineMatchByCode(onlineJoinCode)
+                }}
+                disabled={!multiplayerEligibility.eligible}
+              >
+                Join Code
+              </button>
+            </div>
+
             <div className="rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-200 lg:flex-1">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-semibold text-cyan-200">Multiplayer Access</span>
@@ -1369,7 +1624,33 @@ function App() {
                   >
                     Refresh Snapshot
                   </button>
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100 disabled:opacity-50"
+                    onClick={() => {
+                      void handleCreateInviteCode()
+                    }}
+                    disabled={!onlineSessionId || !multiplayerEligibility.eligible}
+                  >
+                    Create Invite Code
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100 disabled:opacity-50"
+                    onClick={() => {
+                      void handleCopyInviteLink()
+                    }}
+                    disabled={!onlineInviteCode}
+                  >
+                    Copy Invite Link
+                  </button>
                 </div>
+              )}
+              {onlineInviteCode && (
+                <p>
+                  Invite code: <span className="font-semibold text-cyan-200">{onlineInviteCode}</span>
+                  {onlineInviteExpiry ? ` (expires ${new Date(onlineInviteExpiry).toLocaleTimeString()})` : ''}
+                </p>
               )}
               {onlineStatusMessage && (
                 <p
