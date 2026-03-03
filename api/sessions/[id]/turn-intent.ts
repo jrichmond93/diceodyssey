@@ -392,7 +392,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const seatResultForSnapshot = await supabase
       .from('dice_player_seats')
-      .select('seat, user_id, display_name, connected, is_ai')
+      .select('seat, user_id, display_name, avatar_key, connected, is_ai')
       .eq('session_id', sessionId)
       .order('seat', { ascending: true })
 

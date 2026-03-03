@@ -13,6 +13,7 @@ export interface SeatRow {
   seat: number
   user_id: string
   display_name: string
+  avatar_key?: string | null
   connected: boolean
   is_ai: boolean
 }
@@ -26,6 +27,7 @@ export const mapSessionSnapshot = (session: SessionRow, seats: SeatRow[]): Sessi
     seat: seat.seat,
     userId: seat.user_id,
     displayName: seat.display_name,
+    avatarKey: seat.avatar_key ?? undefined,
     connected: seat.connected,
     isAI: seat.is_ai,
   })),

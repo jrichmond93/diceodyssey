@@ -1,10 +1,12 @@
 import type { SyntheticEvent } from 'react'
 import type { Player } from '../types'
 import { findAICharacterBySlug, OPPONENT_THUMBNAIL_FALLBACK_SRC } from '../data/aiCharacters'
+import { getPlayerAvatarSrc, PLAYER_AVATAR_FALLBACK_SRC } from '../multiplayer/avatarCatalog'
 
 interface PlayerStatusProps {
   players: Player[]
   currentPlayerId?: string
+  playerAvatarKeyByPlayerId?: Record<string, string | undefined>
 }
 
 const playerAccentClasses = [
@@ -23,16 +25,20 @@ const playerBadgeClasses = [
 
 const macguffinTokenIcon = '/assets/ui/icon-macguffin-token.png'
 
-const withImageFallback = (event: SyntheticEvent<HTMLImageElement>) => {
+const withImageFallback = (event: SyntheticEvent<HTMLImageElement>, fallbackSrc: string) => {
   const image = event.currentTarget
-  if (image.src.endsWith(OPPONENT_THUMBNAIL_FALLBACK_SRC)) {
+  if (image.src.endsWith(fallbackSrc)) {
     return
   }
 
-  image.src = OPPONENT_THUMBNAIL_FALLBACK_SRC
+  image.src = fallbackSrc
 }
 
-export function PlayerStatus({ players, currentPlayerId }: PlayerStatusProps) {
+export function PlayerStatus({
+  players,
+  currentPlayerId,
+  playerAvatarKeyByPlayerId,
+}: PlayerStatusProps) {
   const playerStyles = new Map<string, { accent: string; badge: string }>()
   players.forEach((player, index) => {
     playerStyles.set(player.id, {
@@ -48,6 +54,7 @@ export function PlayerStatus({ players, currentPlayerId }: PlayerStatusProps) {
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
         {players.map((player) => {
           const aiCharacter = player.aiCharacterSlug ? findAICharacterBySlug(player.aiCharacterSlug) : undefined
+          const humanAvatarKey = playerAvatarKeyByPlayerId?.[player.id]
 
           return (
           <div
@@ -63,7 +70,14 @@ export function PlayerStatus({ players, currentPlayerId }: PlayerStatusProps) {
                   src={aiCharacter?.thumbnailSrc ?? OPPONENT_THUMBNAIL_FALLBACK_SRC}
                   alt={`${player.name} portrait`}
                   className="h-7 w-7 rounded border border-slate-400/90 object-cover"
-                  onError={withImageFallback}
+                  onError={(event) => withImageFallback(event, OPPONENT_THUMBNAIL_FALLBACK_SRC)}
+                />
+              ) : humanAvatarKey ? (
+                <img
+                  src={getPlayerAvatarSrc(humanAvatarKey)}
+                  alt={`${player.name} avatar`}
+                  className="h-7 w-7 rounded border border-slate-400/90 object-cover"
+                  onError={(event) => withImageFallback(event, PLAYER_AVATAR_FALLBACK_SRC)}
                 />
               ) : (
                 <p

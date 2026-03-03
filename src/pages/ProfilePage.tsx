@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from 'react'
 import { useAuth0 } from '@auth0/auth0-react'
 import { Link } from 'react-router-dom'
 import { getAuth0EnvConfig } from '../multiplayer/env'
@@ -7,14 +7,30 @@ import {
   mapAuthUserToMultiplayerIdentity,
   type AuthUserProfile,
 } from '../multiplayer/auth'
+import {
+  getPlayerAvatarSrc,
+  getPlayerAvatarOption,
+  PLAYER_AVATAR_FALLBACK_SRC,
+  PLAYER_AVATAR_OPTIONS,
+  resolvePlayerAvatarKey,
+} from '../multiplayer/avatarCatalog'
 
 interface ProfilePayload {
   profile?: {
     userId: string
     displayName: string
-    avatarUrl?: string | null
+    avatarKey?: string | null
     updatedAt?: string
   }
+}
+
+const withAvatarFallback = (event: SyntheticEvent<HTMLImageElement>) => {
+  const image = event.currentTarget
+  if (image.src.endsWith(PLAYER_AVATAR_FALLBACK_SRC)) {
+    return
+  }
+
+  image.src = PLAYER_AVATAR_FALLBACK_SRC
 }
 
 interface ProfilePageProps {
@@ -40,6 +56,7 @@ const buildApiError = async (response: Response, fallback: string): Promise<stri
 export function ProfilePage({ animationEnabled, onAnimationEnabledChange }: ProfilePageProps) {
   const { isAuthenticated, isLoading, user, loginWithRedirect, logout, getAccessTokenSilently } = useAuth0()
   const [displayName, setDisplayName] = useState('')
+  const [avatarKey, setAvatarKey] = useState(resolvePlayerAvatarKey(undefined))
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -98,6 +115,7 @@ export function ProfilePage({ animationEnabled, onAnimationEnabledChange }: Prof
 
       const body = (await response.json()) as ProfilePayload
       setDisplayName(body.profile?.displayName ?? '')
+      setAvatarKey(resolvePlayerAvatarKey(body.profile?.avatarKey))
       setStatusMessage('Profile loaded.')
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to load profile.')
@@ -130,6 +148,7 @@ export function ProfilePage({ animationEnabled, onAnimationEnabledChange }: Prof
         },
         body: JSON.stringify({
           displayName,
+          avatarKey,
         }),
       })
 
@@ -139,14 +158,15 @@ export function ProfilePage({ animationEnabled, onAnimationEnabledChange }: Prof
 
       const body = (await response.json()) as ProfilePayload
       setDisplayName(body.profile?.displayName ?? displayName)
-      setStatusMessage('Display name updated.')
+      setAvatarKey(resolvePlayerAvatarKey(body.profile?.avatarKey ?? avatarKey))
+      setStatusMessage('Profile updated.')
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to save profile.')
       setStatusMessage(null)
     } finally {
       setIsSubmitting(false)
     }
-  }, [displayName, getApiAccessToken, isAuthenticated])
+  }, [avatarKey, displayName, getApiAccessToken, isAuthenticated])
 
   const handleLogin = useCallback(() => {
     void loginWithRedirect()
@@ -283,6 +303,39 @@ export function ProfilePage({ animationEnabled, onAnimationEnabledChange }: Prof
               />
             </label>
 
+            <div className="space-y-2">
+              <p className="text-sm text-slate-200">Avatar</p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {PLAYER_AVATAR_OPTIONS.map((option) => {
+                  const selected = option.key === avatarKey
+
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => setAvatarKey(option.key)}
+                      className={`rounded-md border p-2 text-left transition ${
+                        selected
+                          ? 'border-cyan-400 bg-cyan-900/20'
+                          : 'border-slate-700 bg-slate-900/60 hover:border-slate-600'
+                      }`}
+                    >
+                      <img
+                        src={getPlayerAvatarSrc(option.key)}
+                        alt={option.label}
+                        className="h-14 w-14 rounded-md border border-slate-700 object-cover"
+                        onError={withAvatarFallback}
+                      />
+                      <p className="mt-2 text-xs font-semibold text-slate-200">{option.label}</p>
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-xs text-slate-400">
+                Selected: {getPlayerAvatarOption(avatarKey).label}
+              </p>
+            </div>
+
             <div className="flex gap-2">
               <button
                 type="button"
@@ -292,7 +345,7 @@ export function ProfilePage({ animationEnabled, onAnimationEnabledChange }: Prof
                 }}
                 disabled={isSubmitting || isLoadingProfile}
               >
-                {isSubmitting ? 'Saving…' : 'Save Display Name'}
+                {isSubmitting ? 'Saving…' : 'Save Profile'}
               </button>
 
               <button

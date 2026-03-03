@@ -7,7 +7,7 @@ import { createApiRequestContext } from '../_lib/requestContext.js'
 import { getSupabaseAdminClient } from '../_lib/supabase.js'
 import { publishSessionRealtimeEventBestEffort } from '../_lib/realtime.js'
 import { initialGameState } from '../_lib/initialGameState.js'
-import { resolveUserDisplayName } from '../_lib/displayName.js'
+import { resolveUserProfileIdentity } from '../_lib/displayName.js'
 
 const getErrorDetail = (error: unknown): string => {
   if (error instanceof Error) {
@@ -70,7 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const user = await verifyRequestUser(req)
     const supabase = getSupabaseAdminClient()
-    const displayName = await resolveUserDisplayName(supabase, user)
+    const identity = await resolveUserProfileIdentity(supabase, user)
 
     const sessionId = crypto.randomUUID()
     const now = new Date().toISOString()
@@ -92,7 +92,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       session_id: sessionId,
       seat: 1,
       user_id: user.userId,
-      display_name: displayName,
+      display_name: identity.displayName,
+      avatar_key: identity.avatarKey,
       connected: true,
       is_ai: false,
       created_at: now,
@@ -111,7 +112,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await publishSessionRealtimeEventBestEffort(sessionId, {
       type: 'PLAYER_JOINED',
       userId: user.userId,
-      displayName,
+      displayName: identity.displayName,
+      avatarKey: identity.avatarKey,
     })
 
     requestContext.logInfo('queue_match_created', {

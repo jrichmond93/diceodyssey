@@ -18,6 +18,27 @@ interface OpponentBioPageProps {
   slug: string
 }
 
+const parseSectionParagraph = (
+  paragraph: string,
+): { heading: string; items: string[] } | undefined => {
+  const sectionMatch = paragraph.match(/^([A-Za-z ]+):\s+(.+)$/)
+  if (!sectionMatch) {
+    return undefined
+  }
+
+  const [, heading, body] = sectionMatch
+  const items = body
+    .split(/\.\s+(?=[A-Z])/)
+    .map((item) => item.trim().replace(/\.$/, ''))
+    .filter((item) => item.length > 0)
+
+  if (items.length < 2) {
+    return undefined
+  }
+
+  return { heading, items }
+}
+
 export function OpponentBioPage({ slug }: OpponentBioPageProps) {
   const location = useLocation()
   const fromGame = Boolean((location.state as { fromGame?: boolean } | null)?.fromGame)
@@ -90,11 +111,28 @@ export function OpponentBioPage({ slug }: OpponentBioPageProps) {
         <h2 className="text-lg font-semibold text-slate-100">Legend</h2>
         {character.completeBioParagraphs && character.completeBioParagraphs.length > 0 ? (
           <div className="mt-2 space-y-3">
-            {character.completeBioParagraphs.map((paragraph) => (
-              <p key={paragraph} className="text-sm leading-relaxed text-slate-300">
-                {paragraph}
-              </p>
-            ))}
+            {character.completeBioParagraphs.map((paragraph, index) => {
+              const section = parseSectionParagraph(paragraph)
+
+              if (!section) {
+                return (
+                  <p key={`${character.slug}-paragraph-${index}`} className="text-sm leading-relaxed text-slate-300">
+                    {paragraph}
+                  </p>
+                )
+              }
+
+              return (
+                <section key={`${character.slug}-section-${index}`} className="space-y-2">
+                  <h3 className="text-sm font-semibold text-slate-100">{section.heading}</h3>
+                  <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-slate-300">
+                    {section.items.map((item) => (
+                      <li key={`${character.slug}-section-${index}-${item}`}>{item}</li>
+                    ))}
+                  </ul>
+                </section>
+              )
+            })}
           </div>
         ) : (
           <p className="mt-2 text-sm leading-relaxed text-slate-300">

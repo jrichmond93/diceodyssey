@@ -95,6 +95,11 @@ export const AI_CHARACTERS: AICharacter[] = [
     phraseDescription: 'Enchanting sorceress',
     longDescription:
       'Circe, a goddess-witch, transforms Odysseus\' men into pigs on her island Aeaea. Odysseus resists with Hermes\' herb and spends a year with her, gaining advice for his journey. She represents seductive dangers that test resolve.',
+    completeBioParagraphs: [
+      'Deep within the mist-shrouded island of Aeaea, where the sun kisses eternal shores, dwells Circe—the radiant daughter of the sun god Helios and a master of ancient sorcery. With a wave of her wand and a whispered incantation, she transformed Odysseus\' scouting party into swine, their human cries twisting into helpless grunts as they rooted in the dirt. Yet when the cunning hero arrived, armed with the protective herb moly gifted by Hermes, Circe\'s power met its match.',
+      'Instead of enmity, a year of passion and alliance blossomed; she became his lover, teacher, and guide, revealing the dangers that lay ahead and the rituals needed to survive the underworld. Her beauty is legendary, her voice like honeyed wine, yet beneath the allure lies a dangerous enigma—a goddess who bends mortals to her will, testing their resolve with temptation and transformation. Those who underestimate her find themselves forever changed.',
+      'In Dice Odyssey, Circe reigns as your mesmerizing rival captain, weaving seductive greens to steal MacGuffins right from under your nose while her hidden reds transform your carefully allocated dice into useless pigs. Cross her at your peril—one wrong roll and she may just turn your entire strategy into swine!',
+    ],
     slug: 'circe',
     thumbnailSrc: '/assets/opponents/circe-thumb.png',
     bioImageSrc: '/assets/opponents/circe-bio.png',
@@ -105,6 +110,13 @@ export const AI_CHARACTERS: AICharacter[] = [
     phraseDescription: 'Isolating nymph',
     longDescription:
       'Calypso detains Odysseus on Ogygia for seven years, offering immortality in love. Zeus forces her release, and she aids his raft-building departure. Her story explores unrequited divine affection and mortal longing for home.',
+    completeBioParagraphs: [
+      'On the remote, mist-veiled island of Ogygia, far beyond the reach of mortal maps, Calypso reigns in lonely splendor. This immortal nymph, daughter of the Titan Atlas, discovered the shipwrecked Odysseus washed ashore after Poseidon\'s wrath. For seven long years she held him in her enchanted embrace, offering him everything a heart could desire—eternal youth, divine love, and a paradise where pain and time could never touch him. Her cave glowed with cedar fires and fragrant thyme, and every dawn she sang while weaving at her golden loom, hoping the hero would forget Ithaca forever and choose her side of eternity.',
+      'Yet even a goddess\'s love could not overcome Odysseus\' longing for home. When Zeus finally sent Hermes with the unbreakable command to release him, Calypso\'s heart broke. With tears in her eyes she helped Odysseus build a sturdy raft, stocked it with food and wine, and gave him fair winds to carry him away. As his sail vanished over the horizon, she stood alone once more on the shore, the weight of immortality heavier than ever.',
+      'Key Traits: Lonely Seductress—offers paradise and immortality, but at the cost of everything the hero holds dear. Graceful Hostess—generous even in heartbreak, providing aid and guidance for the journey ahead. Quiet Strength—endures divine orders and rejection with regal dignity rather than vengeance.',
+      'Epic Feats: Held Odysseus captive for seven years, nearly erasing his will to return home. Obeyed Zeus\'s command despite her own desires, proving her respect for cosmic order. Equipped Odysseus with supplies, tools, and favorable winds for his final voyage.',
+      'Calypso represents the sweetest and most dangerous temptation of all—the choice to abandon duty for perfect, endless comfort. In Dice Odyssey, Calyp appears as your alluring yet isolating rival captain. She lingers on distant planets, using greens to slowly claim MacGuffins while her subtle reds create delays that trap you in place. Stay too long in her orbit and you may forget why you were racing at all… until it\'s too late.',
+    ],
     slug: 'calyp',
     thumbnailSrc: '/assets/opponents/calyp-thumb.png',
     bioImageSrc: '/assets/opponents/calyp-bio.png',
@@ -115,11 +127,17 @@ export const AI_CHARACTERS: AICharacter[] = [
     phraseDescription: 'Giant cyclops',
     longDescription:
       'Polyphemus, a one-eyed giant shepherd, traps and eats Odysseus\' crew in his cave. Odysseus blinds him to escape, invoking Poseidon\'s curse. This encounter epitomizes brute vs. brains in survival.',
+    completeBioParagraphs: [
+      'In the jagged caves of a remote, volcanic island, Polyphemus lurks—a towering, one-eyed giant, son of Poseidon and a sea nymph. Shepherd of monstrous flocks, he lives alone in brutal simplicity, hurling boulders at passing ships and devouring any sailors unlucky enough to land on his shores. When Odysseus and his crew sought shelter in his massive cave, the cyclops rolled a stone slab across the entrance, trapping them inside like livestock. One by one he seized and devoured the men, cracking their bones and drinking their blood with savage delight.',
+      'Odysseus, thinking fast, offered the giant strong wine until he fell into a drunken stupor. Then, with a sharpened olive-wood stake hardened in the fire, the hero and his remaining men drove the blazing point deep into Polyphemus\'s single eye. The giant awoke screaming in agony, thrashing wildly as he cried out to his fellow cyclopes, “Nobody is killing me!” His neighbors laughed and left, believing it was a jest. When dawn came, the blinded giant rolled away the stone to let his sheep out—and Odysseus and his men escaped clinging to the undersides of the woolly beasts.',
+      'Polyphemus\'s roar of rage echoed across the sea as he hurled boulders after the fleeing ship. In his fury he called upon his father Poseidon to curse Odysseus forever—a curse that would haunt the hero for the rest of his journey.',
+      'In Dice Odyssey, Poly crashes onto the galactic stage as your brutish, one-eyed rival captain. He smashes forward with heavy reds, crushing your plans and skipping your turns with raw, unstoppable force. Cross his path and you\'ll feel the full weight of a cyclops\'s rage—one wrong move and he\'ll leave you blinded and screaming into the void.',
+    ],
     slug: 'poly',
     thumbnailSrc: '/assets/opponents/poly-thumb.png',
     bioImageSrc: '/assets/opponents/poly-bio.png',
   },
-  {
+/*   {
     shortName: 'Aeol',
     fullName: 'Aeolus',
     phraseDescription: 'Wind keeper',
@@ -178,7 +196,7 @@ export const AI_CHARACTERS: AICharacter[] = [
     slug: 'eury',
     thumbnailSrc: '/assets/opponents/eury-thumb.png',
     bioImageSrc: '/assets/opponents/eury-bio.png',
-  },
+  }, */
 ]
 
 export const findAICharacterBySlug = (slug: string): AICharacter | undefined =>

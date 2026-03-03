@@ -5,7 +5,7 @@ import { getSupabaseAdminClient } from '../_lib/supabase.js'
 import { publishSessionRealtimeEventBestEffort } from '../_lib/realtime.js'
 import { mapSessionSnapshot, type SeatRow, type SessionRow } from '../_lib/sessionSnapshot.js'
 import { createHotseatGameState } from '../_lib/serverGameState.js'
-import { resolveUserDisplayName } from '../_lib/displayName.js'
+import { resolveUserProfileIdentity } from '../_lib/displayName.js'
 
 interface JoinByCodeBody {
   code?: string
@@ -32,7 +32,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const user = await verifyRequestUser(req)
     const supabase = getSupabaseAdminClient()
-    const displayName = await resolveUserDisplayName(supabase, user)
+    const identity = await resolveUserProfileIdentity(supabase, user)
 
     const inviteResult = await supabase
       .from('dice_match_invites')
@@ -137,7 +137,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       session_id: sessionId,
       seat: nextSeat,
       user_id: user.userId,
-      display_name: displayName,
+      display_name: identity.displayName,
+      avatar_key: identity.avatarKey,
       connected: true,
       is_ai: false,
       created_at: now,
@@ -150,7 +151,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: seatsForInit, error: seatsForInitError } = await supabase
       .from('dice_player_seats')
-      .select('seat, user_id, display_name, connected, is_ai')
+      .select('seat, user_id, display_name, avatar_key, connected, is_ai')
       .eq('session_id', sessionId)
       .order('seat', { ascending: true })
 
@@ -203,7 +204,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await publishSessionRealtimeEventBestEffort(sessionId, {
         type: 'PLAYER_JOINED',
         userId: user.userId,
-        displayName,
+        displayName: identity.displayName,
+        avatarKey: identity.avatarKey,
       })
 
       await publishSessionRealtimeEventBestEffort(sessionId, {

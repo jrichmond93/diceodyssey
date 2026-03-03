@@ -4,12 +4,18 @@ import { methodNotAllowed, readJsonBody, sendJson } from './_lib/http.js'
 import { getSupabaseAdminClient } from './_lib/supabase.js'
 import {
   isDisplayNameAllowedByFormat,
-  resolveUserDisplayName,
+  resolveUserProfileIdentity,
   sanitizeUserProvidedDisplayName,
 } from './_lib/displayName.js'
+import {
+  DEFAULT_PLAYER_AVATAR_KEY,
+  isValidPlayerAvatarKey,
+  resolvePlayerAvatarKey,
+} from '../src/multiplayer/avatarCatalog.js'
 
 interface ProfileBody {
   displayName?: string
+  avatarKey?: string
 }
 
 type SupabaseLikeError = {
@@ -47,6 +53,20 @@ const isUniqueViolationError = (error: unknown): boolean => {
   return message.includes('duplicate key') || message.includes('unique constraint')
 }
 
+const isMissingColumnError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const typedError = error as SupabaseLikeError
+  if (typedError.code === '42703') {
+    return true
+  }
+
+  const message = `${typedError.message ?? ''} ${typedError.details ?? ''} ${typedError.hint ?? ''}`.toLowerCase()
+  return message.includes('column') && message.includes('does not exist')
+}
+
 const containsBlockedTerm = (displayName: string, terms: string[]): boolean => {
   const normalized = displayName.toLowerCase()
   return terms.some((term) => normalized.includes(term.toLowerCase()))
@@ -63,11 +83,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const supabase = getSupabaseAdminClient()
 
     if (req.method === 'GET') {
-      const { data: existingProfile, error: existingProfileError } = await supabase
+      const existingProfileResult = await supabase
         .from('dice_player_profiles')
-        .select('display_name, avatar_url, updated_at')
+        .select('display_name, avatar_key, updated_at')
         .eq('user_id', user.userId)
         .maybeSingle()
+
+      let existingProfile = existingProfileResult.data
+      let existingProfileError = existingProfileResult.error
+
+      if (isMissingColumnError(existingProfileResult.error)) {
+        const legacyResult = await supabase
+          .from('dice_player_profiles')
+          .select('display_name, updated_at')
+          .eq('user_id', user.userId)
+          .maybeSingle()
+
+        existingProfile = legacyResult.data
+        existingProfileError = legacyResult.error
+      }
 
       if (existingProfileError) {
         if (!isMissingRelationError(existingProfileError)) {
@@ -80,20 +114,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           profile: {
             userId: user.userId,
             displayName: existingProfile.display_name,
-            avatarUrl: existingProfile.avatar_url,
+            avatarKey: resolvePlayerAvatarKey(existingProfile.avatar_key as string | undefined),
             updatedAt: existingProfile.updated_at,
           },
         })
         return
       }
 
-      const displayName = await resolveUserDisplayName(supabase, user)
+      const identity = await resolveUserProfileIdentity(supabase, user)
 
       sendJson(res, 200, {
         profile: {
           userId: user.userId,
-          displayName,
-          avatarUrl: null,
+          displayName: identity.displayName,
+          avatarKey: identity.avatarKey,
         },
       })
       return
@@ -101,6 +135,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const body = await readJsonBody<ProfileBody>(req)
     const sanitizedDisplayName = sanitizeUserProvidedDisplayName(body.displayName ?? '')
+    const requestedAvatarKey = (body.avatarKey ?? '').trim()
+    const avatarKey = requestedAvatarKey ? resolvePlayerAvatarKey(requestedAvatarKey) : DEFAULT_PLAYER_AVATAR_KEY
 
     if (!isDisplayNameAllowedByFormat(sanitizedDisplayName)) {
       sendJson(res, 400, {
@@ -133,6 +169,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return
     }
 
+    if (requestedAvatarKey && !isValidPlayerAvatarKey(requestedAvatarKey)) {
+      sendJson(res, 400, {
+        error: 'AVATAR_NOT_ALLOWED',
+        detail: 'Avatar key is invalid. Select one of the predefined avatars.',
+      })
+      return
+    }
+
     const updatedProfile = await supabase
       .from('dice_player_profiles')
       .upsert(
@@ -140,11 +184,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           user_id: user.userId,
           display_name: sanitizedDisplayName,
           display_name_normalized: sanitizedDisplayName.toLowerCase(),
+          avatar_key: avatarKey,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' },
       )
-      .select('display_name, avatar_url, updated_at')
+      .select('display_name, avatar_key, updated_at')
       .single()
 
     if (updatedProfile.error || !updatedProfile.data) {
@@ -152,6 +197,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sendJson(res, 503, {
           error: 'PROFILE_STORAGE_UNAVAILABLE',
           detail: 'Profile storage is not ready. Apply docs/sql/multiplayer-match-discovery-supabase.sql and retry.',
+        })
+        return
+      }
+
+      if (isMissingColumnError(updatedProfile.error)) {
+        sendJson(res, 503, {
+          error: 'PROFILE_STORAGE_UNAVAILABLE',
+          detail: 'Profile avatar storage is not ready. Apply docs/sql/multiplayer-avatar-v1.sql and retry.',
         })
         return
       }
@@ -171,7 +224,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       profile: {
         userId: user.userId,
         displayName: updatedProfile.data.display_name,
-        avatarUrl: updatedProfile.data.avatar_url,
+        avatarKey: resolvePlayerAvatarKey(updatedProfile.data.avatar_key as string | undefined),
         updatedAt: updatedProfile.data.updated_at,
       },
     })

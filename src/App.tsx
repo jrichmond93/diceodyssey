@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type SyntheticEvent } from 'react'
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 import { TouchBackend } from 'react-dnd-touch-backend'
@@ -27,6 +27,10 @@ import {
   mapAuthUserToMultiplayerIdentity,
   type AuthUserProfile,
 } from './multiplayer/auth'
+import {
+  getPlayerAvatarSrc,
+  PLAYER_AVATAR_FALLBACK_SRC,
+} from './multiplayer/avatarCatalog'
 import { getAuth0EnvConfig } from './multiplayer/env'
 import { createSessionRealtimeController, type SessionRealtimeController } from './multiplayer/realtime'
 import type { RealtimeEvent, SessionLifecycleAck, SessionSnapshot, TurnAck } from './multiplayer/types'
@@ -91,7 +95,17 @@ interface PartyInviteEntry {
 interface ProfileDisplayNamePayload {
   profile?: {
     displayName?: string | null
+    avatarKey?: string | null
   }
+}
+
+const withAvatarFallback = (event: SyntheticEvent<HTMLImageElement>) => {
+  const image = event.currentTarget
+  if (image.src.endsWith(PLAYER_AVATAR_FALLBACK_SRC)) {
+    return
+  }
+
+  image.src = PLAYER_AVATAR_FALLBACK_SRC
 }
 
 const allDiceAllocated = (allocation: Allocation): boolean =>
@@ -477,6 +491,17 @@ function App() {
     return `p${seat.seat}`
   }, [onlineSnapshot, multiplayerIdentity])
 
+  const onlineHumanAvatarByPlayerId = useMemo(() => {
+    if (!onlineSnapshot) {
+      return {} as Record<string, string | undefined>
+    }
+
+    return onlineSnapshot.playerSeats.reduce<Record<string, string | undefined>>((accumulator, seat) => {
+      accumulator[`p${seat.seat}`] = seat.avatarKey
+      return accumulator
+    }, {})
+  }, [onlineSnapshot])
+
   const isOnlineActivePlayer = Boolean(
     isOnlineMode && onlinePlayerId && currentPlayer && currentPlayer.id === onlinePlayerId,
   )
@@ -554,7 +579,7 @@ function App() {
       onlineRealtimeRef.current = controller
       await controller.refreshSnapshot()
     },
-    [getApiAccessToken],
+    [getApiAccessToken, multiplayerIdentity?.userId],
   )
 
   const detachOnlineSession = useCallback(async () => {
@@ -2331,6 +2356,26 @@ function App() {
           </section>
         )}
 
+        {isOnlineMode && onlineSnapshot && !authoritativeState.winnerId && (
+          <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-200">
+            <p className="font-semibold text-cyan-200">Match Seats</p>
+            <ul className="mt-2 space-y-2">
+              {onlineSnapshot.playerSeats.map((seat) => (
+                <li key={`${seat.userId}-${seat.seat}`} className="flex items-center gap-2">
+                  <img
+                    src={getPlayerAvatarSrc(seat.avatarKey)}
+                    alt={`${seat.displayName} avatar`}
+                    className="h-7 w-7 rounded border border-slate-600 object-cover"
+                    onError={withAvatarFallback}
+                  />
+                  <span>{seat.displayName}</span>
+                  <span className="text-xs text-slate-400">— {seat.connected ? 'Connected' : 'Disconnected'}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         {authoritativeState.winnerId && (
           <section className="space-y-3 rounded-xl border border-emerald-400 bg-emerald-900/30 p-4 text-emerald-100">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2375,8 +2420,16 @@ function App() {
                 <p className="mt-2 text-emerald-200">Seat readiness:</p>
                 <ul className="mt-1 list-disc space-y-1 pl-5">
                   {onlineSnapshot.playerSeats.map((seat) => (
-                    <li key={`${seat.userId}-${seat.seat}`}>
-                      {seat.displayName} — {seat.connected ? 'Connected' : 'Disconnected'}
+                    <li key={`${seat.userId}-${seat.seat}`} className="flex items-center gap-2">
+                      <img
+                        src={getPlayerAvatarSrc(seat.avatarKey)}
+                        alt={`${seat.displayName} avatar`}
+                        className="h-6 w-6 rounded border border-emerald-400/70 object-cover"
+                        onError={withAvatarFallback}
+                      />
+                      <span>
+                        {seat.displayName} — {seat.connected ? 'Connected' : 'Disconnected'}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -2503,7 +2556,11 @@ function App() {
               onReset={() => setDraftAllocation(emptyAllocation())}
             />
           </div>
-          <PlayerStatus players={authoritativeState.players} currentPlayerId={currentPlayer?.id} />
+          <PlayerStatus
+            players={authoritativeState.players}
+            currentPlayerId={currentPlayer?.id}
+            playerAvatarKeyByPlayerId={isOnlineMode ? onlineHumanAvatarByPlayerId : undefined}
+          />
         </div>
 
         {turnResolutionRoundRecap && (

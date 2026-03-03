@@ -10,6 +10,7 @@ export interface SessionPlayerSeat {
   seat: number
   userId: string
   displayName: string
+  avatarKey?: string
   connected: boolean
   isAI: boolean
 }
@@ -69,7 +70,7 @@ export type RealtimeEvent =
   | { type: 'SESSION_SNAPSHOT'; snapshot: SessionSnapshot }
   | { type: 'TURN_ACCEPTED'; requestId: string; version: number }
   | { type: 'TURN_RESOLVED'; snapshot: SessionSnapshot }
-  | { type: 'PLAYER_JOINED'; userId: string; displayName: string }
+  | { type: 'PLAYER_JOINED'; userId: string; displayName: string; avatarKey?: string }
   | { type: 'PLAYER_LEFT'; userId: string }
   | { type: 'MATCH_FOUND'; sessionId: string }
   | { type: 'GAME_ABANDONED'; snapshot: SessionSnapshot; reason: 'resign' | 'leave' }
