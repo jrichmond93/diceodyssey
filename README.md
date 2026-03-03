@@ -47,28 +47,24 @@ npm install
 npm run dev
 ```
 
+`npm run dev` now starts both the Vite frontend (`:5173`) and local Vercel API runtime (`:3001`) together.
+
 ### Run Multiplayer Locally (Frontend + API)
 
 Multiplayer API routes in `api/` are serverless handlers and are not served by Vite alone.
 
-Use two terminals:
+Use `npm run dev` for normal local multiplayer development.
 
-Terminal 1 (API runtime):
+If you prefer split terminals:
 
-```bash
-npm run dev:api
-```
+Terminal 1 (API runtime): `npm run dev:api`
+
+Terminal 2 (frontend): `npm run dev:web`
 
 If Vercel reports an invalid token, refresh your local auth first:
 
 ```bash
 npx vercel login
-```
-
-Terminal 2 (frontend):
-
-```bash
-npm run dev
 ```
 
 Notes:

@@ -305,7 +305,7 @@ export function ProfilePage({ animationEnabled, onAnimationEnabledChange }: Prof
 
             <div className="space-y-2">
               <p className="text-sm text-slate-200">Avatar</p>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                 {PLAYER_AVATAR_OPTIONS.map((option) => {
                   const selected = option.key === avatarKey
 

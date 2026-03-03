@@ -206,13 +206,15 @@ function App() {
   const [mode, setMode] = useState<GameMode>(() => getStoredHomeMode())
   const [difficulty, setDifficulty] = useState<Difficulty>('medium')
   const [humanName, setHumanName] = useState('Captain')
-  const [aiCount, setAiCount] = useState(2)
+  const [aiCount, setAiCount] = useState(1)
   const [hotseatCount, setHotseatCount] = useState(2)
   const [hotseatNames, setHotseatNames] = useState(buildDefaultHotseatNames(2))
   const [debugEnabled, setDebugEnabled] = useState(false)
   const [animationEnabled, setAnimationEnabled] = useState(true)
   const [draftAllocation, setDraftAllocation] = useState<Allocation>(emptyAllocation())
   const [showDebrief, setShowDebrief] = useState(false)
+  const [singlePlayerAiTurnGate, setSinglePlayerAiTurnGate] = useState(false)
+  const [singlePlayerAutoContinueAiTurns, setSinglePlayerAutoContinueAiTurns] = useState(false)
   const [playbackStage, setPlaybackStage] = useState<TurnResolutionPlaybackStage>('idle')
   const [showResolveAnimation, setShowResolveAnimation] = useState(false)
   const [resolveAnimationVariant, setResolveAnimationVariant] = useState<ResolveAnimationVariant>('rolling')
@@ -1304,9 +1306,19 @@ function App() {
       }
 
       resolutionTimersRef.current.push(window.setTimeout(() => {
+        const nextPlayer =
+          state.players.length > 0
+            ? state.players[(state.currentPlayerIndex + 1) % state.players.length]
+            : undefined
+
         dispatch({ type: 'NEXT_PLAYER' })
         dispatch({ type: 'END_TURN_RESOLUTION' })
         setPlaybackStage('idle')
+
+        if (!isOnlineMode && mode === 'single' && nextPlayer?.isAI && !singlePlayerAutoContinueAiTurns) {
+          setSinglePlayerAiTurnGate(true)
+        }
+
         resolutionTimersRef.current = []
       }, isSkippedTurn ? resolveStageDelay * 2 : resolveStageDelay * 4))
     }
@@ -1329,14 +1341,25 @@ function App() {
     state.started,
     state.winnerId,
     state.animationEnabled,
+    state.currentPlayerIndex,
+    state.players,
     currentPlayer,
+    mode,
+    isOnlineMode,
+    singlePlayerAutoContinueAiTurns,
     isResolving,
     clearResolutionTimers,
     resolveStageDelay,
   ])
 
   useEffect(() => {
-    if (isOnlineMode || !state.started || state.winnerId || !currentPlayer?.isAI || isResolving) {
+    if (isOnlineMode || mode !== 'single' || !state.started || state.winnerId || !currentPlayer?.isAI) {
+      setSinglePlayerAiTurnGate(false)
+    }
+  }, [isOnlineMode, mode, state.started, state.winnerId, currentPlayer?.isAI])
+
+  useEffect(() => {
+    if (isOnlineMode || !state.started || state.winnerId || !currentPlayer?.isAI || isResolving || singlePlayerAiTurnGate) {
       return
     }
 
@@ -1345,7 +1368,17 @@ function App() {
     }, aiThinkDelay)
 
     return () => window.clearTimeout(timer)
-  }, [isOnlineMode, state.started, state.winnerId, currentPlayer?.id, currentPlayer?.isAI, isResolving, startResolutionFlow, aiThinkDelay])
+  }, [
+    isOnlineMode,
+    state.started,
+    state.winnerId,
+    currentPlayer?.id,
+    currentPlayer?.isAI,
+    isResolving,
+    singlePlayerAiTurnGate,
+    startResolutionFlow,
+    aiThinkDelay,
+  ])
 
   const handleStart = () => {
     if (mode === 'multiplayer') {
@@ -2528,6 +2561,7 @@ function App() {
                 disabled={
                   currentPlayer.isAI || isResolving || (isOnlineMode && !isOnlineActivePlayer)
                 }
+                showHelpTips={helpOpen}
                 onAllocationChange={setDraftAllocation}
                 onAllocatePreferred={handleAllocatePreferred}
               />
@@ -2550,8 +2584,26 @@ function App() {
                 (isOnlineMode && (!isOnlineActivePlayer || onlineSubmitting))
               }
               isAI={Boolean(currentPlayer?.isAI) && !authoritativeState.winnerId}
+              currentAiName={currentPlayer?.isAI ? currentPlayer.name : undefined}
               resolving={isResolving}
               resolvingLabel={resolvingMessage}
+              showAiTurnGate={
+                !isOnlineMode &&
+                mode === 'single' &&
+                Boolean(currentPlayer?.isAI) &&
+                singlePlayerAiTurnGate &&
+                !isResolving &&
+                !authoritativeState.winnerId
+              }
+              showAiAutoPlayToggle={
+                !isOnlineMode &&
+                mode === 'single' &&
+                authoritativeState.started &&
+                !authoritativeState.winnerId
+              }
+              autoPlayAiTurns={singlePlayerAutoContinueAiTurns}
+              onAutoPlayAiTurnsChange={setSinglePlayerAutoContinueAiTurns}
+              onContinueAiTurn={() => setSinglePlayerAiTurnGate(false)}
               onSubmit={handleEndTurn}
               onReset={() => setDraftAllocation(emptyAllocation())}
             />
@@ -2560,6 +2612,7 @@ function App() {
             players={authoritativeState.players}
             currentPlayerId={currentPlayer?.id}
             playerAvatarKeyByPlayerId={isOnlineMode ? onlineHumanAvatarByPlayerId : undefined}
+            showHelpTips={helpOpen}
           />
         </div>
 

@@ -7,6 +7,7 @@ interface PlayerStatusProps {
   players: Player[]
   currentPlayerId?: string
   playerAvatarKeyByPlayerId?: Record<string, string | undefined>
+  showHelpTips?: boolean
 }
 
 const playerAccentClasses = [
@@ -38,6 +39,7 @@ export function PlayerStatus({
   players,
   currentPlayerId,
   playerAvatarKeyByPlayerId,
+  showHelpTips,
 }: PlayerStatusProps) {
   const playerStyles = new Map<string, { accent: string; badge: string }>()
   players.forEach((player, index) => {
@@ -50,7 +52,10 @@ export function PlayerStatus({
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
       <h2 className="mb-3 text-lg font-semibold text-slate-100">Captain Status</h2>
-      <p className="mb-3 text-xs text-slate-400">MacGuffins: first to 7 wins. Position: where your ship is. Skips: turns you must pass (max 3 stacked). Defense: subtracts incoming sabotage skips.</p>
+      <p className="mb-3 text-xs text-slate-400">
+        MacGuffins: first to 7 wins.
+        {showHelpTips ? ' Position: where your ship is. Skips: turns you must pass (max 3 stacked). Defense: subtracts incoming sabotage skips.' : ''}
+      </p>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
         {players.map((player) => {
           const aiCharacter = player.aiCharacterSlug ? findAICharacterBySlug(player.aiCharacterSlug) : undefined
@@ -72,21 +77,13 @@ export function PlayerStatus({
                   className="h-7 w-7 rounded border border-slate-400/90 object-cover"
                   onError={(event) => withImageFallback(event, OPPONENT_THUMBNAIL_FALLBACK_SRC)}
                 />
-              ) : humanAvatarKey ? (
+              ) : (
                 <img
                   src={getPlayerAvatarSrc(humanAvatarKey)}
                   alt={`${player.name} avatar`}
                   className="h-7 w-7 rounded border border-slate-400/90 object-cover"
                   onError={(event) => withImageFallback(event, PLAYER_AVATAR_FALLBACK_SRC)}
                 />
-              ) : (
-                <p
-                  className={`rounded border px-1.5 py-0.5 text-xs uppercase ${
-                    playerStyles.get(player.id)?.badge ?? 'border-slate-600 bg-slate-800 text-slate-300'
-                  }`}
-                >
-                  Human
-                </p>
               )}
             </div>
             <div className="mt-2 space-y-1 text-sm text-slate-300">
