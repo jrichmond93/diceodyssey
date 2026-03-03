@@ -88,6 +88,12 @@ interface PartyInviteEntry {
   createdAt?: string
 }
 
+interface ProfileDisplayNamePayload {
+  profile?: {
+    displayName?: string | null
+  }
+}
+
 const allDiceAllocated = (allocation: Allocation): boolean =>
   allocation.move.length + allocation.claim.length + allocation.sabotage.length === 6
 
@@ -211,6 +217,7 @@ function App() {
   const [receivedPartyInvites, setReceivedPartyInvites] = useState<PartyInviteEntry[]>([])
   const [sentPartyInvites, setSentPartyInvites] = useState<PartyInviteEntry[]>([])
   const [socialLoading, setSocialLoading] = useState(false)
+  const [profileDisplayName, setProfileDisplayName] = useState<string | null>(null)
 
   const auth0Audience = useMemo(() => {
     try {
@@ -379,11 +386,50 @@ function App() {
   )
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      setProfileDisplayName(null)
+      return
+    }
+
+    let cancelled = false
+
+    void (async () => {
+      try {
+        const token = await getApiAccessToken()
+        const response = await fetch('/api/profile', {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
+
+        if (!response.ok || cancelled) {
+          return
+        }
+
+        const body = (await response.json()) as ProfileDisplayNamePayload
+        const nextDisplayName = body.profile?.displayName?.trim()
+        if (!cancelled) {
+          setProfileDisplayName(nextDisplayName || null)
+        }
+      } catch {
+        if (!cancelled) {
+          setProfileDisplayName(null)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [getApiAccessToken, isAuthenticated])
+
+  useEffect(() => {
     if (mode !== 'single') {
       return
     }
 
-    const displayName = multiplayerIdentity?.displayName?.trim()
+    const displayName = profileDisplayName?.trim() || multiplayerIdentity?.displayName?.trim()
     if (!displayName) {
       return
     }
@@ -396,7 +442,7 @@ function App() {
 
       return displayName
     })
-  }, [mode, multiplayerIdentity?.displayName])
+  }, [mode, multiplayerIdentity?.displayName, profileDisplayName])
 
   const onlinePlayerId = useMemo(() => {
     if (!onlineSnapshot || !multiplayerIdentity) {
