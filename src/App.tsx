@@ -1208,6 +1208,10 @@ function App() {
   }, [isOnlineMode, state.started, state.winnerId, currentPlayer?.id, currentPlayer?.isAI, isResolving, startResolutionFlow, aiThinkDelay])
 
   const handleStart = () => {
+    if (mode === 'multiplayer') {
+      return
+    }
+
     if (mode === 'hotseat') {
       const parsed = hotseatNames
         .split(',')
@@ -1686,7 +1690,7 @@ function App() {
             </p>
           </div>
 
-          <div className="mt-6 grid gap-4 lg:grid-cols-4">
+          <div className="mt-6 grid gap-3 lg:grid-cols-4">
             <label className="flex flex-col gap-1 text-sm text-slate-200">
               Mode
               <select
@@ -1696,23 +1700,24 @@ function App() {
               >
                 <option value="single">Single Player</option>
                 <option value="hotseat">Hotseat Multiplayer</option>
+                <option value="multiplayer">Multiplayer</option>
               </select>
             </label>
 
-            <label className="flex flex-col gap-1 text-sm text-slate-200">
-              AI Difficulty
-              <select
-                className="rounded-md border border-slate-600 bg-slate-900 p-2"
-                value={difficulty}
-                onChange={(event) => setDifficulty(event.target.value as Difficulty)}
-              >
-                <option value="easy">Easy</option>
-                <option value="medium">Medium</option>
-              </select>
-            </label>
-
-            {mode === 'single' ? (
+            {mode === 'single' && (
               <>
+                <label className="flex flex-col gap-1 text-sm text-slate-200">
+                  AI Difficulty
+                  <select
+                    className="rounded-md border border-slate-600 bg-slate-900 p-2"
+                    value={difficulty}
+                    onChange={(event) => setDifficulty(event.target.value as Difficulty)}
+                  >
+                    <option value="easy">Easy</option>
+                    <option value="medium">Medium</option>
+                  </select>
+                </label>
+
                 <label className="flex flex-col gap-1 text-sm text-slate-200">
                   Your Name
                   <input
@@ -1735,7 +1740,9 @@ function App() {
                   </select>
                 </label>
               </>
-            ) : (
+            )}
+
+            {mode === 'hotseat' && (
               <>
                 <label className="flex flex-col gap-1 text-sm text-slate-200">
                   Players
@@ -1761,51 +1768,66 @@ function App() {
                 </label>
               </>
             )}
+
           </div>
 
-          <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-2">
-            <button
-              type="button"
-              className="rounded-md bg-cyan-500 px-5 py-2 font-semibold text-slate-950 lg:whitespace-nowrap"
-              onClick={handleStart}
-              disabled={isOnlineMode}
-            >
-              Start Game
-            </button>
+          <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-2">
+            {mode === 'multiplayer' && !isAuthenticated && (
+              <Link
+                to="/profile"
+                className="rounded-md border border-cyan-400 bg-cyan-900/30 px-4 py-2 text-sm font-semibold text-cyan-100"
+              >
+                Log In for Multiplayer mode
+              </Link>
+            )}
 
-            <button
-              type="button"
-              className="rounded-md border border-cyan-400 bg-cyan-900/30 px-5 py-2 font-semibold text-cyan-100 lg:whitespace-nowrap disabled:opacity-50"
-              onClick={() => {
-                void handleStartOnlineMatch()
-              }}
-              disabled={!multiplayerEligibility.eligible || isOnlineMode}
-            >
-              Start Online Match
-            </button>
-
-            <div className="flex w-full items-center gap-2 lg:max-w-sm">
-              <input
-                className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-sm"
-                value={onlineJoinCode}
-                onChange={(event) => setOnlineJoinCode(event.target.value)}
-                placeholder="Invite code (e.g. roll1)"
-              />
+            {mode !== 'multiplayer' && (
               <button
                 type="button"
-                className="rounded-md border border-slate-500 px-3 py-2 text-sm font-semibold text-slate-100 disabled:opacity-50"
-                onClick={() => {
-                  void joinOnlineMatchByCode(onlineJoinCode)
-                }}
-                disabled={!multiplayerEligibility.eligible}
+                className="rounded-md bg-cyan-500 px-5 py-2 font-semibold text-slate-950 lg:whitespace-nowrap"
+                onClick={handleStart}
+                disabled={isOnlineMode}
               >
-                Join Code
+                Start Game
               </button>
-            </div>
+            )}
 
+            {mode === 'multiplayer' && (
+              <>
+                <button
+                  type="button"
+                  className="rounded-md border border-cyan-400 bg-cyan-900/30 px-5 py-2 font-semibold text-cyan-100 lg:whitespace-nowrap disabled:opacity-50"
+                  onClick={() => {
+                    void handleStartOnlineMatch()
+                  }}
+                  disabled={!multiplayerEligibility.eligible || isOnlineMode}
+                >
+                  Start Online Match
+                </button>
+
+                <div className="flex w-full items-center gap-2 lg:max-w-sm">
+                  <input
+                    className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-sm"
+                    value={onlineJoinCode}
+                    onChange={(event) => setOnlineJoinCode(event.target.value)}
+                    placeholder="Invite code (e.g. roll1)"
+                  />
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-500 px-3 py-2 text-sm font-semibold text-slate-100 disabled:opacity-50"
+                    onClick={() => {
+                      void joinOnlineMatchByCode(onlineJoinCode)
+                    }}
+                    disabled={!multiplayerEligibility.eligible}
+                  >
+                    Join Code
+                  </button>
+                </div>
+              </>
+            )}
           </div>
 
-          {(onlineStatusMessage || onlineError || onlineSessionId) && (
+          {mode === 'multiplayer' && (onlineStatusMessage || onlineError || onlineSessionId) && (
             <div className="mt-3 space-y-2 rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-200">
               {onlineSessionId && (
                 <div className="flex flex-wrap items-center gap-2">
@@ -1876,7 +1898,7 @@ function App() {
             </div>
           )}
 
-          {multiplayerEligibility.eligible && (
+          {mode === 'multiplayer' && multiplayerEligibility.eligible && (
             <div className="mt-3 grid gap-3 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-200 md:grid-cols-2">
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
@@ -2033,7 +2055,7 @@ function App() {
             </article>
           </div>
 
-          {SHOW_DEBUG_CONTROLS && (
+          {mode === 'multiplayer' && SHOW_DEBUG_CONTROLS && (
             <section className="mt-4 space-y-2 rounded-md border border-slate-700 bg-slate-900/50 p-3 text-xs text-slate-300">
               <p className="font-semibold text-slate-200">Temporary Debug (remove later)</p>
               <div className="flex flex-col gap-2 lg:flex-row lg:items-center">

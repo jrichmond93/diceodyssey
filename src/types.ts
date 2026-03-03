@@ -2,7 +2,7 @@ export type Color = 'red' | 'blue' | 'green'
 
 export type ActionType = 'move' | 'claim' | 'sabotage'
 
-export type GameMode = 'single' | 'hotseat'
+export type GameMode = 'single' | 'hotseat' | 'multiplayer'
 
 export type Difficulty = 'easy' | 'medium'
 

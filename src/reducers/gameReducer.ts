@@ -76,6 +76,10 @@ const createPlayers = (payload: InitGamePayload): Player[] => {
     return payload.humanNames.map((name, index) => makePlayer(`p${index + 1}`, name, false))
   }
 
+  if (payload.mode === 'multiplayer') {
+    return [makePlayer('human', payload.humanNames[0] || 'Human', false)]
+  }
+
   const humans = [makePlayer('human', payload.humanNames[0] || 'Human', false)]
   const selectedCharacters = pickRandomUniqueAICharacters(payload.aiCount)
   const ais = Array.from({ length: payload.aiCount }, (_, index) => {
