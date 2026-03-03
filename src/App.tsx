@@ -169,6 +169,12 @@ const getStoredHomeMode = (): GameMode => {
 const buildDefaultHotseatNames = (count: number): string =>
   Array.from({ length: count }, (_, index) => `Capt${index + 1}`).join(', ')
 
+const logAutofillDebug = (...args: unknown[]) => {
+  if (import.meta.env.DEV) {
+    console.debug(...args)
+  }
+}
+
 function App() {
   const {
     isAuthenticated,
@@ -388,6 +394,7 @@ function App() {
   useEffect(() => {
     if (!isAuthenticated) {
       setProfileDisplayName(null)
+      logAutofillDebug('[name-autofill] not authenticated; cleared profile display name')
       return
     }
 
@@ -404,6 +411,9 @@ function App() {
         })
 
         if (!response.ok || cancelled) {
+          if (!cancelled) {
+            logAutofillDebug('[name-autofill] profile fetch not ok', { status: response.status })
+          }
           return
         }
 
@@ -411,10 +421,14 @@ function App() {
         const nextDisplayName = body.profile?.displayName?.trim()
         if (!cancelled) {
           setProfileDisplayName(nextDisplayName || null)
+          logAutofillDebug('[name-autofill] profile display name fetched', {
+            profileDisplayName: nextDisplayName || null,
+          })
         }
       } catch {
         if (!cancelled) {
           setProfileDisplayName(null)
+          logAutofillDebug('[name-autofill] profile fetch failed; cleared profile display name')
         }
       }
     })()
@@ -429,20 +443,26 @@ function App() {
       return
     }
 
-    const displayName = profileDisplayName?.trim() || multiplayerIdentity?.displayName?.trim()
+    const displayName = profileDisplayName?.trim()
     if (!displayName) {
+      logAutofillDebug('[name-autofill] no profile display name available; keeping current single-player name')
       return
     }
 
     setHumanName((current) => {
       const trimmedCurrent = current.trim()
       if (trimmedCurrent && trimmedCurrent !== 'Captain') {
+        logAutofillDebug('[name-autofill] preserving custom user-entered name', { current: trimmedCurrent })
         return current
       }
 
+      logAutofillDebug('[name-autofill] applying profile display name to single-player name', {
+        from: trimmedCurrent || 'Captain',
+        to: displayName,
+      })
       return displayName
     })
-  }, [mode, multiplayerIdentity?.displayName, profileDisplayName])
+  }, [mode, profileDisplayName])
 
   const onlinePlayerId = useMemo(() => {
     if (!onlineSnapshot || !multiplayerIdentity) {
