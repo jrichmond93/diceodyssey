@@ -42,6 +42,7 @@ const MACGUFFIN_TOKEN_ICON = '/assets/ui/icon-macguffin-token.png'
 const HUMAN_WIN_CELEBRATION_MS = 4200
 const HUMAN_WIN_REDUCED_MOTION_MS = 2400
 const HUMAN_WIN_SCROLL_LEAD_MS = 260
+const SHOW_DEBUG_CONTROLS = /^(1|true)$/i.test(import.meta.env.VITE_SHOW_DEBUG_CONTROLS ?? '')
 
 const humanWinConfetti = [
   { left: 3, delay: 0, duration: 1850, colorClass: 'text-cyan-300' },
@@ -151,7 +152,6 @@ function App() {
     isLoading: isAuthLoading,
     user,
     loginWithRedirect,
-    logout,
     getAccessTokenSilently,
   } = useAuth0()
   const location = useLocation()
@@ -370,18 +370,6 @@ function App() {
       (onlineStatusMessage.includes('Opponent left the match.') ||
         onlineStatusMessage.includes('Match ended because a player left.')),
   )
-
-  const handleLogin = useCallback(() => {
-    void loginWithRedirect()
-  }, [loginWithRedirect])
-
-  const handleLogout = useCallback(() => {
-    void logout({
-      logoutParams: {
-        returnTo: window.location.origin,
-      },
-    })
-  }, [logout])
 
   useEffect(() => {
     return () => {
@@ -1600,7 +1588,10 @@ function App() {
   if (pathname === '/profile') {
     return (
       <div className="flex min-h-screen flex-col">
-        <ProfilePage />
+        <ProfilePage
+          animationEnabled={animationEnabled}
+          onAnimationEnabledChange={setAnimationEnabled}
+        />
         <AppFooter />
       </div>
     )
@@ -1796,25 +1787,6 @@ function App() {
             <div className="flex w-full items-center gap-2 lg:max-w-sm">
               <input
                 className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-sm"
-                value={onlineJoinSessionId}
-                onChange={(event) => setOnlineJoinSessionId(event.target.value)}
-                placeholder="Advanced (debug): Session ID"
-              />
-              <button
-                type="button"
-                className="rounded-md border border-slate-500 px-3 py-2 text-sm font-semibold text-slate-100 disabled:opacity-50"
-                onClick={() => {
-                  void handleJoinOnlineMatch()
-                }}
-                disabled={!multiplayerEligibility.eligible}
-              >
-                Join ID (debug)
-              </button>
-            </div>
-
-            <div className="flex w-full items-center gap-2 lg:max-w-sm">
-              <input
-                className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-sm"
                 value={onlineJoinCode}
                 onChange={(event) => setOnlineJoinCode(event.target.value)}
                 placeholder="Invite code (e.g. roll1)"
@@ -1831,54 +1803,6 @@ function App() {
               </button>
             </div>
 
-            <div className="rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-200 lg:flex-1">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-semibold text-cyan-200">Multiplayer Access</span>
-                {isAuthenticated ? (
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="rounded-md border border-slate-600 px-2 py-1 text-xs font-semibold text-slate-100"
-                  >
-                    Log out
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleLogin}
-                    disabled={isAuthLoading}
-                    className="rounded-md border border-slate-600 px-2 py-1 text-xs font-semibold text-slate-100 disabled:opacity-50"
-                  >
-                    {isAuthLoading ? 'Checking auth…' : 'Log in'}
-                  </button>
-                )}
-              </div>
-              <p className="mt-1 text-xs text-slate-300">
-                {multiplayerEligibility.eligible
-                  ? `Eligible for multiplayer as ${multiplayerIdentity?.displayName ?? 'Pilot'}.`
-                  : multiplayerEligibility.reason === 'AUTH_LOADING'
-                    ? 'Checking authentication status for multiplayer access.'
-                    : 'Login is required for multiplayer entry in V1. Local play remains available.'}
-              </p>
-            </div>
-
-            <label className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-900/60 p-2 text-sm text-slate-200 lg:flex-1">
-              <input
-                type="checkbox"
-                checked={animationEnabled}
-                onChange={(event) => setAnimationEnabled(event.target.checked)}
-              />
-              Show animation
-            </label>
-
-            <label className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-900/60 p-2 text-sm text-slate-200 lg:flex-1">
-              <input
-                type="checkbox"
-                checked={debugEnabled}
-                onChange={(event) => setDebugEnabled(event.target.checked)}
-              />
-              Enable logging
-            </label>
           </div>
 
           {(onlineStatusMessage || onlineError || onlineSessionId) && (
@@ -2108,6 +2032,41 @@ function App() {
               </p>
             </article>
           </div>
+
+          {SHOW_DEBUG_CONTROLS && (
+            <section className="mt-4 space-y-2 rounded-md border border-slate-700 bg-slate-900/50 p-3 text-xs text-slate-300">
+              <p className="font-semibold text-slate-200">Temporary Debug (remove later)</p>
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                <div className="flex w-full items-center gap-2 lg:max-w-sm">
+                  <input
+                    className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-sm"
+                    value={onlineJoinSessionId}
+                    onChange={(event) => setOnlineJoinSessionId(event.target.value)}
+                    placeholder="Advanced (debug): Session ID"
+                  />
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-500 px-3 py-2 text-sm font-semibold text-slate-100 disabled:opacity-50"
+                    onClick={() => {
+                      void handleJoinOnlineMatch()
+                    }}
+                    disabled={!multiplayerEligibility.eligible}
+                  >
+                    Join ID (debug)
+                  </button>
+                </div>
+
+                <label className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-900/60 p-2 text-sm text-slate-200 lg:w-fit">
+                  <input
+                    type="checkbox"
+                    checked={debugEnabled}
+                    onChange={(event) => setDebugEnabled(event.target.checked)}
+                  />
+                  Enable logging
+                </label>
+              </div>
+            </section>
+          )}
           </div>
         </div>
         <AppFooter />
