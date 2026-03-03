@@ -32,6 +32,7 @@ import { createSessionRealtimeController, type SessionRealtimeController } from 
 import type { RealtimeEvent, SessionLifecycleAck, SessionSnapshot, TurnAck } from './multiplayer/types'
 
 const HELP_STORAGE_KEY = 'dice-odysseys-help-open'
+const HOME_MODE_STORAGE_KEY = 'dice-odysseys-home-mode'
 const AI_THINK_DELAY_MS = 600
 const RESOLVE_STAGE_DELAY_MS = 240
 const REDUCED_MOTION_STAGE_DELAY_MS = 80
@@ -146,6 +147,22 @@ const isGameStateLike = (value: unknown): value is GameState => {
   )
 }
 
+const getStoredHomeMode = (): GameMode => {
+  if (typeof window === 'undefined') {
+    return 'single'
+  }
+
+  const stored = window.localStorage.getItem(HOME_MODE_STORAGE_KEY)
+  if (stored === 'single' || stored === 'hotseat' || stored === 'multiplayer') {
+    return stored
+  }
+
+  return 'single'
+}
+
+const buildDefaultHotseatNames = (count: number): string =>
+  Array.from({ length: count }, (_, index) => `Capt${index + 1}`).join(', ')
+
 function App() {
   const {
     isAuthenticated,
@@ -160,12 +177,12 @@ function App() {
   const joinCodeFromQuery = useMemo(() => new URLSearchParams(location.search).get('code')?.trim() ?? '', [location.search])
   const opponentBioSlug = getOpponentBioSlug(pathname)
   const [state, dispatch] = useReducer(gameReducer, initialGameState)
-  const [mode, setMode] = useState<GameMode>('single')
+  const [mode, setMode] = useState<GameMode>(() => getStoredHomeMode())
   const [difficulty, setDifficulty] = useState<Difficulty>('medium')
   const [humanName, setHumanName] = useState('Captain')
   const [aiCount, setAiCount] = useState(2)
   const [hotseatCount, setHotseatCount] = useState(2)
-  const [hotseatNames, setHotseatNames] = useState('Captain 1, Captain 2')
+  const [hotseatNames, setHotseatNames] = useState(buildDefaultHotseatNames(2))
   const [debugEnabled, setDebugEnabled] = useState(false)
   const [animationEnabled, setAnimationEnabled] = useState(true)
   const [draftAllocation, setDraftAllocation] = useState<Allocation>(emptyAllocation())
@@ -296,6 +313,18 @@ function App() {
   }, [helpOpen])
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.setItem(HOME_MODE_STORAGE_KEY, mode)
+  }, [mode])
+
+  useEffect(() => {
+    setHotseatNames(buildDefaultHotseatNames(hotseatCount))
+  }, [hotseatCount])
+
+  useEffect(() => {
     if (authoritativeState.winnerId) {
       const timer = window.setTimeout(() => {
         setShowDebrief(true)
@@ -348,6 +377,26 @@ function App() {
     () => getMultiplayerEligibility(isAuthenticated, isAuthLoading),
     [isAuthenticated, isAuthLoading],
   )
+
+  useEffect(() => {
+    if (mode !== 'single') {
+      return
+    }
+
+    const displayName = multiplayerIdentity?.displayName?.trim()
+    if (!displayName) {
+      return
+    }
+
+    setHumanName((current) => {
+      const trimmedCurrent = current.trim()
+      if (trimmedCurrent && trimmedCurrent !== 'Captain') {
+        return current
+      }
+
+      return displayName
+    })
+  }, [mode, multiplayerIdentity?.displayName])
 
   const onlinePlayerId = useMemo(() => {
     if (!onlineSnapshot || !multiplayerIdentity) {
@@ -1763,7 +1812,7 @@ function App() {
                     className="rounded-md border border-slate-600 bg-slate-900 p-2"
                     value={hotseatNames}
                     onChange={(event) => setHotseatNames(event.target.value)}
-                    placeholder="Captain 1, Captain 2"
+                    placeholder="Capt1, Capt2"
                   />
                 </label>
               </>
