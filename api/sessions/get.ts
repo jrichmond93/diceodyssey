@@ -20,8 +20,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    await verifyRequestUser(req)
+    const user = await verifyRequestUser(req)
     const supabase = getSupabaseAdminClient()
+
+    await supabase
+      .from('dice_player_seats')
+      .update({
+        connected: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('session_id', sessionId)
+      .eq('user_id', user.userId)
 
     const sessionResult = await supabase
       .from('dice_sessions')

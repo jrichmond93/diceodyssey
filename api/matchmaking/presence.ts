@@ -6,11 +6,13 @@ import { getSupabaseAdminClient } from '../_lib/supabase.js'
 interface PresenceEntry {
   userId: string
   displayName: string
+  avatarKey?: string
   status: 'Available' | 'In Lobby' | 'In Match'
   sessionId?: string
 }
 
-const PRESENCE_STALE_WINDOW_MS = 15 * 60 * 1000
+const LOBBY_STALE_WINDOW_MS = 30 * 1000
+const ACTIVE_STALE_WINDOW_MS = 15 * 60 * 1000
 
 type PresenceVisibility = 'discoverable' | 'friends-only' | 'private'
 
@@ -62,13 +64,13 @@ const parseTimestamp = (value: unknown): number | null => {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-const isRecentEnough = (value: unknown, nowMs: number): boolean => {
+const isRecentEnough = (value: unknown, nowMs: number, staleWindowMs: number): boolean => {
   const timestamp = parseTimestamp(value)
   if (timestamp === null) {
     return true
   }
 
-  return nowMs - timestamp <= PRESENCE_STALE_WINDOW_MS
+  return nowMs - timestamp <= staleWindowMs
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -83,7 +85,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const [profilesResultWithVisibility, seatsResult, friendEdgesResult, invitesResult] = await Promise.all([
       supabase.from('dice_player_profiles').select('user_id, display_name, presence_visibility'),
-      supabase.from('dice_player_seats').select('session_id, user_id, connected, is_ai, updated_at'),
+      supabase.from('dice_player_seats').select('session_id, user_id, avatar_key, connected, is_ai, updated_at'),
       supabase.from('dice_friend_edges').select('requester_user_id, addressee_user_id, status'),
       supabase
         .from('dice_party_invites')
@@ -193,8 +195,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return false
         }
 
-        const sessionRecent = isRecentEnough(sessionUpdatedAtById.get(sessionId), nowMs)
-        const seatRecent = isRecentEnough((seat as Record<string, unknown>).updated_at, nowMs)
+        const seatRecent = isRecentEnough(
+          (seat as Record<string, unknown>).updated_at,
+          nowMs,
+          sessionStatus === 'lobby' ? LOBBY_STALE_WINDOW_MS : ACTIVE_STALE_WINDOW_MS,
+        )
+
+        if (sessionStatus === 'lobby') {
+          return seatRecent
+        }
+
+        const sessionRecent = isRecentEnough(
+          sessionUpdatedAtById.get(sessionId),
+          nowMs,
+          ACTIVE_STALE_WINDOW_MS,
+        )
 
         return sessionRecent && seatRecent
       },
@@ -202,7 +217,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const uniqueOnlineUserIds = new Set<string>()
     connectedHumanSeats.forEach((seat) => {
-      if (typeof seat.user_id === 'string' && canViewerSeeUser(seat.user_id)) {
+      if (typeof seat.user_id === 'string') {
         uniqueOnlineUserIds.add(seat.user_id)
       }
     })
@@ -216,8 +231,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (
         sessionStatusById.get(sessionId) === 'lobby' &&
-        typeof seat.user_id === 'string' &&
-        canViewerSeeUser(seat.user_id)
+        typeof seat.user_id === 'string'
       ) {
         searchingUserIds.add(seat.user_id)
       }
@@ -225,7 +239,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const availableNowEntries: PresenceEntry[] = connectedHumanSeats
       .filter((seat) => seat.user_id !== user.userId)
-      .filter((seat) => typeof seat.user_id === 'string' && canViewerSeeUser(seat.user_id))
+      .filter((seat) => typeof seat.user_id === 'string')
       .map((seat) => {
         const sessionId = seat.session_id as string | undefined
         const seatUserId = seat.user_id as string
@@ -234,6 +248,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return {
           userId: seatUserId,
           displayName: displayNameByUserId.get(seatUserId) ?? getFallbackDisplayName(seatUserId),
+          avatarKey: typeof (seat as Record<string, unknown>).avatar_key === 'string'
+            ? ((seat as Record<string, unknown>).avatar_key as string)
+            : undefined,
           status:
             sessionStatus === 'active'
               ? 'In Match'
@@ -243,6 +260,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           sessionId,
         }
       })
+      .filter((entry) => entry.status === 'In Lobby' && Boolean(entry.sessionId))
 
     const deduplicatedAvailableNowEntries = Array.from(
       availableNowEntries.reduce<Map<string, PresenceEntry>>((accumulator, entry) => {

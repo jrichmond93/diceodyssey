@@ -98,6 +98,7 @@ interface ActiveOpponent {
 interface PresenceDirectoryEntry {
   userId: string
   displayName: string
+  avatarKey?: string
   status?: 'Available' | 'In Lobby' | 'In Match'
   sessionId?: string
 }
@@ -291,6 +292,7 @@ function App() {
   const celebrationTimerRef = useRef<number | null>(null)
   const onlineRealtimeRef = useRef<SessionRealtimeController | null>(null)
   const onlineSessionGuardRef = useRef<string | null>(null)
+  const onlineLobbyBootstrappingRef = useRef(false)
   const matchStartStateRef = useRef<MatchStartState>('IDLE')
   const [helpOpen, setHelpOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
@@ -590,6 +592,10 @@ function App() {
             continue
           }
 
+          if (entry.status === 'In Match' || !entry.sessionId) {
+            continue
+          }
+
           if (!uniquePlayers.has(entry.userId)) {
             uniquePlayers.set(entry.userId, entry)
           }
@@ -608,6 +614,7 @@ function App() {
       const uniqueByUserId = new Map<string, {
         userId: string
         displayName: string
+        avatarKey?: string
         status: 'Available' | 'In Match'
         sessionId?: string
       }>()
@@ -619,6 +626,7 @@ function App() {
             uniqueByUserId.set(seat.userId, {
               userId: seat.userId,
               displayName: seat.displayName,
+              avatarKey: seat.avatarKey ?? undefined,
               status: seat.connected ? 'Available' : 'In Match',
               sessionId: onlineSessionId ?? undefined,
             })
@@ -790,8 +798,11 @@ function App() {
 
       const presenceResponse = await fetch('/api/matchmaking/presence', {
         method: 'GET',
+        cache: 'no-store',
         headers: {
           Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
         },
       })
 
@@ -817,6 +828,22 @@ function App() {
 
     void refreshPresenceData()
   }, [multiplayerEligibility.eligible, refreshPresenceData])
+
+  useEffect(() => {
+    if (homeStartMode !== 'ONLINE' || !multiplayerEligibility.eligible) {
+      return
+    }
+
+    void refreshPresenceData()
+
+    const interval = window.setInterval(() => {
+      void refreshPresenceData()
+    }, 5000)
+
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [homeStartMode, multiplayerEligibility.eligible, refreshPresenceData])
 
   const refreshOnlineSnapshot = useCallback(async () => {
     if (!onlineRealtimeRef.current || !onlineSessionId) {
@@ -1209,6 +1236,35 @@ function App() {
     trackUnifiedPlayEvent,
   ])
 
+  const leaveCurrentLobbySessionIfNeeded = useCallback(async () => {
+    if (!onlineSessionId) {
+      return
+    }
+
+    if (onlineSnapshot?.gameState.started) {
+      return
+    }
+
+    try {
+      const token = await getApiAccessToken()
+      await fetch('/api/sessions/leave', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          sessionId: onlineSessionId,
+          clientRequestId: crypto.randomUUID(),
+        }),
+      })
+    } catch {
+    } finally {
+      await detachOnlineSession()
+      void refreshPresenceData()
+    }
+  }, [detachOnlineSession, getApiAccessToken, onlineSessionId, onlineSnapshot?.gameState.started, refreshPresenceData])
+
   const handleStartOnlineAiMatch = useCallback(
     async (aiSlug: string) => {
       if (!multiplayerEligibility.eligible) {
@@ -1237,6 +1293,8 @@ function App() {
       })
 
       try {
+        await leaveCurrentLobbySessionIfNeeded()
+
         const token = await getApiAccessToken()
         const response = await fetch('/api/sessions/start-vs-ai', {
           method: 'POST',
@@ -1278,6 +1336,7 @@ function App() {
     [
       connectOnlineSession,
       getApiAccessToken,
+      leaveCurrentLobbySessionIfNeeded,
       multiplayerEligibility.eligible,
       setMatchStartStateTracked,
       trackUnifiedPlayEvent,
@@ -1381,6 +1440,11 @@ function App() {
 
       try {
         setOnlineError(null)
+
+        if (onlineSessionId && onlineSessionId !== seat.sessionId) {
+          await leaveCurrentLobbySessionIfNeeded()
+        }
+
         const token = await getApiAccessToken()
         const response = await fetch('/api/sessions/join', {
           method: 'POST',
@@ -1413,8 +1477,77 @@ function App() {
         setOnlineStatusMessage(null)
       }
     },
-    [connectOnlineSession, getApiAccessToken, multiplayerEligibility.eligible, setMatchStartStateTracked, trackUnifiedPlayEvent],
+    [
+      connectOnlineSession,
+      getApiAccessToken,
+      leaveCurrentLobbySessionIfNeeded,
+      multiplayerEligibility.eligible,
+      onlineSessionId,
+      setMatchStartStateTracked,
+      trackUnifiedPlayEvent,
+    ],
   )
+
+  useEffect(() => {
+    if (homeStartMode !== 'ONLINE' || !multiplayerEligibility.eligible) {
+      return
+    }
+
+    if (isOnlineMode || onlineLobbyBootstrappingRef.current) {
+      return
+    }
+
+    let cancelled = false
+    onlineLobbyBootstrappingRef.current = true
+
+    void (async () => {
+      try {
+        const token = await getApiAccessToken()
+        const response = await fetch('/api/matchmaking/queue', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
+
+        if (!response.ok) {
+          throw new Error(await buildApiErrorMessage(response, 'Failed to enter waiting lobby'))
+        }
+
+        const body = (await response.json()) as { sessionId: string }
+        if (cancelled) {
+          return
+        }
+
+        setOnlineSessionId(body.sessionId)
+        await connectOnlineSession(body.sessionId)
+
+        if (!cancelled) {
+          setOnlineError(null)
+          setOnlineStatusMessage('You are now visible in Waiting humans.')
+          void refreshPresenceData()
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setOnlineError(error instanceof Error ? error.message : 'Failed to enter waiting lobby.')
+        }
+      } finally {
+        onlineLobbyBootstrappingRef.current = false
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      onlineLobbyBootstrappingRef.current = false
+    }
+  }, [
+    connectOnlineSession,
+    getApiAccessToken,
+    homeStartMode,
+    isOnlineMode,
+    multiplayerEligibility.eligible,
+    refreshPresenceData,
+  ])
 
   useEffect(() => {
     if (homeStartMode !== 'ONLINE' || !multiplayerEligibility.eligible) {
@@ -1426,7 +1559,7 @@ function App() {
       return
     }
 
-    if (onlineSessionId || onlineSnapshot?.gameState.started) {
+    if (onlineSnapshot?.gameState.started) {
       if (onlineWaitState !== 'IDLE' || onlinePrimaryTimerExpiresAt !== null || onlineDecisionTimerExpiresAt !== null) {
         setOnlineWaitState('IDLE')
         setOnlinePrimaryTimerExpiresAt(null)
@@ -1457,7 +1590,6 @@ function App() {
     multiplayerEligibility.eligible,
     onlineDecisionTimerExpiresAt,
     onlinePrimaryTimerExpiresAt,
-    onlineSessionId,
     onlineSnapshot?.gameState.started,
     onlineWaitState,
     setMatchStartStateTracked,
@@ -1501,12 +1633,45 @@ function App() {
       trackUnifiedPlayEvent('online_wait_timer_expired', {
         phase: 'decision',
       })
+
+      if (onlineSessionId) {
+        const expiresAt = Date.now() + ONLINE_PRIMARY_WAIT_TIMEOUT_MS
+        setOnlineStatusMessage('Still waiting for match confirmation...')
+        setOnlineWaitState('WAITING_PRIMARY')
+        setOnlinePrimaryTimerExpiresAt(expiresAt)
+        setOnlineDecisionTimerExpiresAt(null)
+        return
+      }
+
       setOnlineStatusMessage('No selection made in time. Returning to Instant Adventure.')
       handleSelectHomeStartMode('INSTANT')
     }, remainingMs)
 
     return () => window.clearTimeout(timer)
-  }, [handleSelectHomeStartMode, onlineDecisionTimerExpiresAt, onlineWaitState, trackUnifiedPlayEvent])
+  }, [handleSelectHomeStartMode, onlineDecisionTimerExpiresAt, onlineSessionId, onlineWaitState, trackUnifiedPlayEvent])
+
+  useEffect(() => {
+    if (
+      homeStartMode !== 'ONLINE' ||
+      !onlineSessionId ||
+      onlineSnapshot?.gameState.started ||
+      (onlineWaitState !== 'WAITING_PRIMARY' && onlineWaitState !== 'WAITING_DECISION')
+    ) {
+      return
+    }
+
+    const interval = window.setInterval(() => {
+      if (!onlineRealtimeRef.current) {
+        return
+      }
+
+      void onlineRealtimeRef.current.refreshSnapshot().catch(() => undefined)
+    }, 2000)
+
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [homeStartMode, onlineSessionId, onlineSnapshot?.gameState.started, onlineWaitState])
 
   useEffect(() => {
     if (!quickOnlineFlowActive || !onlineSessionId || !onlineSnapshot) {
@@ -2107,10 +2272,10 @@ function App() {
                           onClick={() => {
                             void handleSelectWaitingHuman(seat)
                           }}
-                          disabled={!multiplayerEligibility.eligible || isOnlineMode}
+                          disabled={!multiplayerEligibility.eligible || onlineLifecycleSubmitting || onlineSubmitting}
                         >
                           <img
-                            src={PLAYER_AVATAR_FALLBACK_SRC}
+                            src={getPlayerAvatarSrc(seat.avatarKey)}
                             alt={`${seat.displayName} avatar`}
                             className="h-7 w-7 rounded border border-slate-600 object-cover"
                             onError={withAvatarFallback}
@@ -2135,7 +2300,7 @@ function App() {
                         onClick={() => {
                           void handleStartOnlineAiMatch(aiCharacter.slug)
                         }}
-                        disabled={!multiplayerEligibility.eligible || isOnlineMode}
+                        disabled={!multiplayerEligibility.eligible || onlineLifecycleSubmitting || onlineSubmitting}
                       >
                         <img
                           src={aiCharacter.thumbnailSrc}
