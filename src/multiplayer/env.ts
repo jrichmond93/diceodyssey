@@ -13,6 +13,12 @@ export interface MultiplayerEnvConfig {
   }
 }
 
+export interface UnifiedPlayFeatureFlags {
+  unifiedPlayV1: boolean
+  presenceDirectoryV1: boolean
+  hybridRematchReplacementV1: boolean
+}
+
 export type Auth0EnvConfig = MultiplayerEnvConfig['auth0']
 export type SupabaseEnvConfig = MultiplayerEnvConfig['supabase']
 
@@ -28,6 +34,23 @@ const readRequiredEnv = (key: keyof ImportMetaEnv): string => {
 const readOptionalEnv = (key: keyof ImportMetaEnv): string | undefined => {
   const value = import.meta.env[key]
   return value || undefined
+}
+
+const readBooleanEnv = (key: keyof ImportMetaEnv, fallback: boolean): boolean => {
+  const value = readOptionalEnv(key)
+  if (!value) {
+    return fallback
+  }
+
+  if (/^(1|true|yes|on)$/i.test(value)) {
+    return true
+  }
+
+  if (/^(0|false|no|off)$/i.test(value)) {
+    return false
+  }
+
+  return fallback
 }
 
 export const getAuth0EnvConfig = (): Auth0EnvConfig => ({
@@ -47,4 +70,10 @@ export const getSupabaseEnvConfig = (): SupabaseEnvConfig => ({
 export const getMultiplayerEnvConfig = (): MultiplayerEnvConfig => ({
   auth0: getAuth0EnvConfig(),
   supabase: getSupabaseEnvConfig(),
+})
+
+export const getUnifiedPlayFeatureFlags = (): UnifiedPlayFeatureFlags => ({
+  unifiedPlayV1: readBooleanEnv('VITE_UNIFIED_PLAY_V1', true),
+  presenceDirectoryV1: readBooleanEnv('VITE_PRESENCE_DIRECTORY_V1', true),
+  hybridRematchReplacementV1: readBooleanEnv('VITE_HYBRID_REMATCH_REPLACEMENT_V1', true),
 })

@@ -2,13 +2,14 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { verifyRequestUser } from '../_lib/auth.js'
 import { methodNotAllowed, readJsonBody, sendJson } from '../_lib/http.js'
 import { publishSessionRealtimeEventBestEffort } from '../_lib/realtime.js'
-import { createHotseatGameState } from '../_lib/serverGameState.js'
+import { createHybridGameState } from '../_lib/serverGameState.js'
 import { mapSessionSnapshot, type SeatRow, type SessionRow } from '../_lib/sessionSnapshot.js'
 import { getSupabaseAdminClient } from '../_lib/supabase.js'
 
 interface RematchBody {
   sessionId?: string
   clientRequestId?: string
+  seatPlan?: Array<'auto' | 'human' | 'ai'>
 }
 
 type SessionStatus = 'lobby' | 'active' | 'finished' | 'abandoned'
@@ -20,6 +21,18 @@ interface SessionLifecycleRow {
   game_state: unknown
   created_at: string
   updated_at: string
+}
+
+const isValidSeatMode = (value: unknown): value is 'auto' | 'human' | 'ai' =>
+  value === 'auto' || value === 'human' || value === 'ai'
+
+interface RematchSeatAssignment {
+  seat: number
+  userId: string
+  displayName: string
+  avatarKey?: string | null
+  connected: boolean
+  isAI: boolean
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -110,11 +123,154 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const seats = (seatsResult.data ?? []) as SeatRow[]
-    const connectedHumanNames = seats
-      .filter((seat) => !seat.is_ai && seat.connected)
-      .map((seat) => seat.display_name)
 
-    if (connectedHumanNames.length < 2) {
+    const requestedSeatPlan = body.seatPlan
+    if (requestedSeatPlan && !Array.isArray(requestedSeatPlan)) {
+      sendJson(res, 400, {
+        accepted: false,
+        action: 'REMATCH',
+        reason: 'REMATCH_INVALID_PLAN',
+        requestId: body.clientRequestId ?? 'unknown',
+        sessionId,
+      })
+      return
+    }
+
+    if (requestedSeatPlan && requestedSeatPlan.some((mode) => !isValidSeatMode(mode))) {
+      sendJson(res, 400, {
+        accepted: false,
+        action: 'REMATCH',
+        reason: 'REMATCH_INVALID_PLAN',
+        requestId: body.clientRequestId ?? 'unknown',
+        sessionId,
+      })
+      return
+    }
+
+    const seatPlan = seats.map((_, index) => requestedSeatPlan?.[index] ?? 'auto')
+    const lockedSeatIndex = seats.findIndex((seat, index) => {
+      if (seatPlan[index] !== 'human') {
+        return false
+      }
+
+      return seat.connected !== true || seat.is_ai === true
+    })
+
+    if (lockedSeatIndex >= 0) {
+      sendJson(res, 409, {
+        accepted: false,
+        action: 'REMATCH',
+        reason: 'REMATCH_SEAT_LOCKED',
+        requestId: body.clientRequestId ?? 'unknown',
+        sessionId,
+      })
+      return
+    }
+
+    const seatByNumber = new Map<number, SeatRow>()
+    seats.forEach((seat) => {
+      seatByNumber.set(seat.seat, seat)
+    })
+
+    const connectedHumanBySeat = new Map<number, SeatRow>()
+    seats
+      .filter((seat) => seat.is_ai !== true && seat.connected === true)
+      .forEach((seat) => connectedHumanBySeat.set(seat.seat, seat))
+
+    const unusedConnectedHumans = seats.filter((seat) => seat.is_ai !== true && seat.connected === true)
+    const consumeConnectedHuman = (): SeatRow | undefined => {
+      const next = unusedConnectedHumans.shift()
+      if (!next) {
+        return undefined
+      }
+
+      connectedHumanBySeat.delete(next.seat)
+      return next
+    }
+
+    const rematchAssignments: RematchSeatAssignment[] = seats.map((seat, index) => {
+      const mode = seatPlan[index]
+      const seatNumber = seat.seat
+
+      if (mode === 'ai') {
+        return {
+          seat: seatNumber,
+          userId: `ai|rematch-${sessionId}-${seatNumber}`,
+          displayName: `AI Rival ${seatNumber}`,
+          connected: true,
+          isAI: true,
+        }
+      }
+
+      if (mode === 'human') {
+        const exactHuman = connectedHumanBySeat.get(seatNumber)
+        if (exactHuman) {
+          connectedHumanBySeat.delete(seatNumber)
+          const consumedIndex = unusedConnectedHumans.findIndex((candidate) => candidate.seat === seatNumber)
+          if (consumedIndex >= 0) {
+            unusedConnectedHumans.splice(consumedIndex, 1)
+          }
+
+          return {
+            seat: seatNumber,
+            userId: exactHuman.user_id,
+            displayName: exactHuman.display_name,
+            avatarKey: exactHuman.avatar_key,
+            connected: true,
+            isAI: false,
+          }
+        }
+
+        return {
+          seat: seatNumber,
+          userId: `ai|rematch-${sessionId}-${seatNumber}`,
+          displayName: `AI Rival ${seatNumber}`,
+          connected: true,
+          isAI: true,
+        }
+      }
+
+      const exactHuman = connectedHumanBySeat.get(seatNumber)
+      if (exactHuman) {
+        connectedHumanBySeat.delete(seatNumber)
+        const consumedIndex = unusedConnectedHumans.findIndex((candidate) => candidate.seat === seatNumber)
+        if (consumedIndex >= 0) {
+          unusedConnectedHumans.splice(consumedIndex, 1)
+        }
+
+        return {
+          seat: seatNumber,
+          userId: exactHuman.user_id,
+          displayName: exactHuman.display_name,
+          avatarKey: exactHuman.avatar_key,
+          connected: true,
+          isAI: false,
+        }
+      }
+
+      const fallbackHuman = consumeConnectedHuman()
+      if (fallbackHuman) {
+        return {
+          seat: seatNumber,
+          userId: fallbackHuman.user_id,
+          displayName: fallbackHuman.display_name,
+          avatarKey: fallbackHuman.avatar_key,
+          connected: true,
+          isAI: false,
+        }
+      }
+
+      return {
+        seat: seatNumber,
+        userId: `ai|rematch-${sessionId}-${seatNumber}`,
+        displayName: `AI Rival ${seatNumber}`,
+        connected: true,
+        isAI: true,
+      }
+    })
+
+    const activeHumanSeatCount = rematchAssignments.filter((seat) => !seat.isAI).length
+    if (activeHumanSeatCount < 1) {
       sendJson(res, 400, {
         accepted: false,
         action: 'REMATCH',
@@ -126,7 +282,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const now = new Date().toISOString()
-    const nextGameState = createHotseatGameState(connectedHumanNames)
+
+    for (const assignment of rematchAssignments) {
+      const existingSeat = seatByNumber.get(assignment.seat)
+      if (!existingSeat) {
+        continue
+      }
+
+      const seatUpdate = await supabase
+        .from('dice_player_seats')
+        .update({
+          user_id: assignment.userId,
+          display_name: assignment.displayName,
+          avatar_key: assignment.avatarKey ?? null,
+          connected: assignment.connected,
+          is_ai: assignment.isAI,
+          updated_at: now,
+        })
+        .eq('session_id', sessionId)
+        .eq('seat', assignment.seat)
+
+      if (seatUpdate.error) {
+        throw seatUpdate.error
+      }
+    }
+
+    const nextGameState = createHybridGameState(
+      rematchAssignments.map((assignment) => ({
+        name: assignment.displayName,
+        isAI: assignment.isAI,
+      })),
+    )
 
     const sessionUpdate = await supabase
       .from('dice_sessions')
@@ -159,11 +345,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       payload: {
         actorUserId: user.userId,
         requestId: body.clientRequestId ?? null,
+        seatPlan,
       },
       created_at: now,
     })
 
-    const snapshot = mapSessionSnapshot(sessionUpdate.data as SessionRow, seats)
+    const refreshedSeatsResult = await supabase
+      .from('dice_player_seats')
+      .select('seat, user_id, display_name, avatar_key, connected, is_ai')
+      .eq('session_id', sessionId)
+      .order('seat', { ascending: true })
+
+    if (refreshedSeatsResult.error) {
+      throw refreshedSeatsResult.error
+    }
+
+    const snapshot = mapSessionSnapshot(sessionUpdate.data as SessionRow, (refreshedSeatsResult.data ?? []) as SeatRow[])
 
     await publishSessionRealtimeEventBestEffort(sessionId, {
       type: 'REMATCH_STARTED',

@@ -55,6 +55,8 @@ export type SessionLifecycleReason =
   | 'NOT_IN_SESSION'
   | 'REMATCH_NOT_READY'
   | 'REMATCH_REQUIRES_PLAYERS'
+  | 'REMATCH_SEAT_LOCKED'
+  | 'REMATCH_INVALID_PLAN'
 
 export interface SessionLifecycleAck {
   accepted: boolean

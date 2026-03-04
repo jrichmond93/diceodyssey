@@ -20,6 +20,11 @@ const makePlayer = (id: string, name: string): Player => ({
   allocation: undefined,
 })
 
+interface HybridSeatPlayerConfig {
+  name: string
+  isAI: boolean
+}
+
 const makePlanet = (id: number): Planet => ({
   id,
   face: randomInt(1, 7),
@@ -45,6 +50,45 @@ export const createHotseatGameState = (humanNames: string[]): GameState => {
         id: crypto.randomUUID(),
         turn: 1,
         message: `Game started: hotseat mode with ${players.length} player(s).`,
+      },
+    ],
+    debugEnabled: false,
+    animationEnabled: false,
+    debugLog: [],
+    turnResolution: {
+      active: false,
+      stage: 'idle',
+      message: '',
+    },
+    latestTurnResolution: undefined,
+    turnResolutionHistory: [],
+  }
+}
+
+export const createHybridGameState = (seatPlayers: HybridSeatPlayerConfig[]): GameState => {
+  const players = seatPlayers.map((seatPlayer, index) => {
+    const base = makePlayer(`p${index + 1}`, seatPlayer.name)
+    return {
+      ...base,
+      isAI: seatPlayer.isAI,
+    }
+  })
+
+  return {
+    started: true,
+    mode: 'hotseat',
+    players,
+    currentPlayerIndex: 0,
+    turn: 1,
+    galaxy: Array.from({ length: INITIAL_GALAXY_SIZE }, (_, i) => makePlanet(i + 1)),
+    difficulty: 'medium',
+    winnerId: undefined,
+    winnerReason: undefined,
+    log: [
+      {
+        id: crypto.randomUUID(),
+        turn: 1,
+        message: `Game started: hybrid rematch with ${players.length} seat(s).`,
       },
     ],
     debugEnabled: false,

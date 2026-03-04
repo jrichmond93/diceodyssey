@@ -117,6 +117,7 @@ Multiplayer environment access is defined in `src/multiplayer/env.ts` and typed 
 	- Run `docs/supabase-multiplayer-bootstrap.sql` in Supabase SQL Editor once to create
 	  `dice_sessions`, `dice_player_seats`, `dice_turn_intents`, and `dice_session_events`.
 	- Run `docs/sql/multiplayer-match-discovery-supabase.sql` for profile storage used by `/api/profile`.
+	- Run `docs/sql/multiplayer-presence-moderation-v1.sql` for presence visibility persistence and moderation action storage.
 	- Run `docs/sql/multiplayer-avatar-v1.sql` to add `avatar_key` support for profile avatar selection and seat snapshots.
 
 ### Phase 4 Realtime Notes
@@ -177,7 +178,7 @@ Notes:
 - Ensure `AUTH0_DOMAIN` is host-only (for example: `your-tenant.us.auth0.com`, no `https://`).
 - API handlers require `SUPABASE_SERVICE_ROLE_KEY`; multiplayer APIs will fail with 500/401 without it.
 - Run `docs/supabase-multiplayer-bootstrap.sql` once in the target Supabase project to create `dice_` tables.
-- Run `docs/sql/multiplayer-match-discovery-supabase.sql` and `docs/sql/multiplayer-avatar-v1.sql` to enable profile + avatar persistence.
+- Run `docs/sql/multiplayer-match-discovery-supabase.sql`, `docs/sql/multiplayer-presence-moderation-v1.sql`, and `docs/sql/multiplayer-avatar-v1.sql` to enable profile + presence/moderation + avatar persistence.
 
 ### Post-Deploy Multiplayer Smoke
 

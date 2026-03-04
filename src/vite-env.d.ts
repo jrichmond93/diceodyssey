@@ -9,6 +9,9 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_PROJECT_REF: string
   readonly VITE_SUPABASE_URL: string
   readonly VITE_SUPABASE_ANON_KEY: string
+  readonly VITE_UNIFIED_PLAY_V1?: string
+  readonly VITE_PRESENCE_DIRECTORY_V1?: string
+  readonly VITE_HYBRID_REMATCH_REPLACEMENT_V1?: string
 }
 
 interface ImportMeta {

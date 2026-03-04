@@ -16,6 +16,7 @@ vi.mock('./_lib/supabase', () => ({
 }))
 
 import queueHandler from './matchmaking/queue.js'
+import presenceHandler from './matchmaking/presence.js'
 import joinHandler from './sessions/[id]/join.js'
 import sessionHandler from './sessions/[id]/index.js'
 import turnIntentHandler from './sessions/[id]/turn-intent.js'
@@ -26,9 +27,11 @@ import inviteCodeHandler from './sessions/invite-code.js'
 import joinByCodeHandler from './sessions/join-by-code.js'
 import revokeInviteCodeHandler from './sessions/revoke-invite-code.js'
 import profileHandler from './profile.js'
+import profileVisibilityHandler from './profile/visibility.js'
 import friendRequestHandler from './friends/request.js'
 import friendRespondHandler from './friends/respond.js'
 import friendListHandler from './friends/list.js'
+import friendModerateHandler from './friends/moderate.js'
 import partyInviteHandler from './sessions/party-invite.js'
 import partyInviteRespondHandler from './sessions/party-invite/respond.js'
 import partyInvitesHandler from './sessions/party-invites.js'
@@ -48,6 +51,7 @@ type TableName =
   | 'dice_blocked_terms'
   | 'dice_friend_edges'
   | 'dice_party_invites'
+  | 'dice_social_moderation_actions'
 
 class FakeSupabaseQuery {
   private filters: Array<{ key: string; value: unknown; op: 'eq' | 'gt' | 'lte' }> = []
@@ -399,6 +403,7 @@ describe('Phase 3 API lifecycle', () => {
       dice_blocked_terms: [],
       dice_friend_edges: [],
       dice_party_invites: [],
+      dice_social_moderation_actions: [],
     }
 
     verifyRequestUserMock.mockReset()
@@ -660,6 +665,78 @@ describe('Phase 3 API lifecycle', () => {
     expect(leaveAck.snapshot?.status).toBe('abandoned')
   })
 
+  it('rejects rematch when Human-only seat is disconnected by seat plan', async () => {
+    const queueRes = createMockRes()
+    await queueHandler(createMockReq({ method: 'POST' }), queueRes)
+    expect(queueRes.getResult().statusCode).toBe(200)
+    const sessionId = (queueRes.getResult().payload as QueueResponsePayload).sessionId
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u2', subject: 'auth0|u2' })
+    const joinRes = createMockRes()
+    await joinHandler(createMockReq({ method: 'POST', query: { id: sessionId } }), joinRes)
+    expect(joinRes.getResult().statusCode).toBe(200)
+
+    db.dice_sessions = db.dice_sessions.map((session) =>
+      session.id === sessionId ? { ...session, status: 'finished' } : session,
+    )
+
+    db.dice_player_seats = db.dice_player_seats.map((seat) =>
+      seat.session_id === sessionId && seat.user_id === 'auth0|u2' ? { ...seat, connected: false } : seat,
+    )
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u1', subject: 'auth0|u1' })
+    const rematchRes = createMockRes()
+    await rematchHandler(
+      createMockReq({
+        method: 'POST',
+        body: { sessionId, clientRequestId: 'rematch-seat-lock-1', seatPlan: ['human', 'human'] },
+      }),
+      rematchRes,
+    )
+
+    const rematchResult = rematchRes.getResult()
+    expect(rematchResult.statusCode).toBe(409)
+    expect((rematchResult.payload as TurnAckPayload).reason).toBe('REMATCH_SEAT_LOCKED')
+  })
+
+  it('supports rematch with AI seat assignment from seat plan', async () => {
+    const queueRes = createMockRes()
+    await queueHandler(createMockReq({ method: 'POST' }), queueRes)
+    expect(queueRes.getResult().statusCode).toBe(200)
+    const sessionId = (queueRes.getResult().payload as QueueResponsePayload).sessionId
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u2', subject: 'auth0|u2' })
+    const joinRes = createMockRes()
+    await joinHandler(createMockReq({ method: 'POST', query: { id: sessionId } }), joinRes)
+    expect(joinRes.getResult().statusCode).toBe(200)
+
+    db.dice_sessions = db.dice_sessions.map((session) =>
+      session.id === sessionId ? { ...session, status: 'finished' } : session,
+    )
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u1', subject: 'auth0|u1' })
+    const rematchRes = createMockRes()
+    await rematchHandler(
+      createMockReq({
+        method: 'POST',
+        body: {
+          sessionId,
+          clientRequestId: 'rematch-ai-plan-1',
+          seatPlan: ['human', 'ai'],
+        },
+      }),
+      rematchRes,
+    )
+
+    const rematchResult = rematchRes.getResult()
+    expect(rematchResult.statusCode).toBe(200)
+
+    const rematchAck = rematchResult.payload as TurnAckPayload
+    expect(rematchAck.accepted).toBe(true)
+    expect(rematchAck.snapshot?.playerSeats.some((seat) => seat.isAI)).toBe(true)
+    expect(rematchAck.snapshot?.playerSeats.some((seat) => seat.userId.startsWith('ai|rematch-'))).toBe(true)
+  })
+
   it('rejects rematch while game is still active', async () => {
     const queueRes = createMockRes()
     await queueHandler(createMockReq({ method: 'POST' }), queueRes)
@@ -856,6 +933,7 @@ describe('Phase 3 API lifecycle', () => {
   it('revokes active invite codes for the requesting host', async () => {
     const queueRes = createMockRes()
     await queueHandler(createMockReq({ method: 'POST' }), queueRes)
+
     const sessionId = (queueRes.getResult().payload as QueueResponsePayload).sessionId
 
     const inviteRes = createMockRes()
@@ -935,6 +1013,96 @@ describe('Phase 3 API lifecycle', () => {
 
     const seat = db.dice_player_seats[0]
     expect(seat?.display_name).toBe('Captain Nova')
+  })
+
+  it('updates and reads profile presence visibility', async () => {
+    const updateRes = createMockRes()
+    await profileVisibilityHandler(
+      createMockReq({
+        method: 'PUT',
+        body: {
+          visibility: 'private',
+        },
+      }),
+      updateRes,
+    )
+
+    expect(updateRes.getResult().statusCode).toBe(200)
+    expect(
+      db.dice_player_profiles.some(
+        (profile) => profile.user_id === 'auth0|u1' && profile.presence_visibility === 'private',
+      ),
+    ).toBe(true)
+
+    const getRes = createMockRes()
+    await profileVisibilityHandler(createMockReq({ method: 'GET' }), getRes)
+
+    expect(getRes.getResult().statusCode).toBe(200)
+    const payload = getRes.getResult().payload as { visibility?: string }
+    expect(payload.visibility).toBe('private')
+  })
+
+  it('records moderation actions and supports blocking by display name', async () => {
+    db.dice_player_profiles.push(
+      {
+        user_id: 'auth0|u1',
+        display_name: 'Pilot One',
+        display_name_normalized: 'pilot one',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      {
+        user_id: 'auth0|u2',
+        display_name: 'Pilot Two',
+        display_name_normalized: 'pilot two',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    )
+
+    const muteRes = createMockRes()
+    await friendModerateHandler(
+      createMockReq({
+        method: 'POST',
+        body: {
+          targetDisplayName: 'Pilot Two',
+          action: 'MUTE',
+        },
+      }),
+      muteRes,
+    )
+
+    expect(muteRes.getResult().statusCode).toBe(200)
+    expect(
+      db.dice_social_moderation_actions.some(
+        (row) =>
+          row.actor_user_id === 'auth0|u1' &&
+          row.target_user_id === 'auth0|u2' &&
+          row.action_type === 'mute',
+      ),
+    ).toBe(true)
+
+    const blockRes = createMockRes()
+    await friendModerateHandler(
+      createMockReq({
+        method: 'POST',
+        body: {
+          targetDisplayName: 'Pilot Two',
+          action: 'BLOCK',
+        },
+      }),
+      blockRes,
+    )
+
+    expect(blockRes.getResult().statusCode).toBe(200)
+    expect(
+      db.dice_friend_edges.some(
+        (row) =>
+          row.requester_user_id === 'auth0|u1' &&
+          row.addressee_user_id === 'auth0|u2' &&
+          row.status === 'blocked',
+      ),
+    ).toBe(true)
   })
 
   it('supports friend request -> accept -> list lifecycle', async () => {
@@ -1098,6 +1266,170 @@ describe('Phase 3 API lifecycle', () => {
       received?: Array<{ id: string }>
     }
     expect(payload.received?.some((invite) => invite.id === 'invite-1')).toBe(true)
+  })
+
+  it('returns presence summary and discovery lists', async () => {
+    const now = Date.now()
+
+    db.dice_sessions.push(
+      {
+        id: 'session-lobby',
+        status: 'lobby',
+      },
+      {
+        id: 'session-active',
+        status: 'active',
+      },
+    )
+
+    db.dice_player_profiles.push(
+      {
+        user_id: 'auth0|u1',
+        display_name: 'Pilot One',
+      },
+      {
+        user_id: 'auth0|u2',
+        display_name: 'Pilot Two',
+      },
+      {
+        user_id: 'auth0|u3',
+        display_name: 'Pilot Three',
+      },
+    )
+
+    db.dice_player_seats.push(
+      {
+        session_id: 'session-lobby',
+        user_id: 'auth0|u1',
+        connected: true,
+        is_ai: false,
+      },
+      {
+        session_id: 'session-lobby',
+        user_id: 'auth0|u2',
+        connected: true,
+        is_ai: false,
+      },
+      {
+        session_id: 'session-active',
+        user_id: 'auth0|u3',
+        connected: true,
+        is_ai: false,
+      },
+    )
+
+    db.dice_friend_edges.push({
+      requester_user_id: 'auth0|u1',
+      addressee_user_id: 'auth0|u2',
+      status: 'accepted',
+    })
+
+    db.dice_party_invites.push({
+      id: 'invite-presence-1',
+      session_id: 'session-lobby',
+      from_user_id: 'auth0|u2',
+      to_user_id: 'auth0|u1',
+      status: 'pending',
+      expires_at: new Date(now + 60_000).toISOString(),
+      created_at: new Date(now).toISOString(),
+      updated_at: new Date(now).toISOString(),
+    })
+
+    const presenceRes = createMockRes()
+    await presenceHandler(createMockReq({ method: 'GET' }), presenceRes)
+
+    expect(presenceRes.getResult().statusCode).toBe(200)
+
+    const payload = presenceRes.getResult().payload as {
+      presence: {
+        playersOnlineNow: number
+        playersSearchingNow: number
+        estimatedWaitSeconds: number
+        availableNow: Array<{ userId: string }>
+        friendsOnline: Array<{ userId: string }>
+        joinNextGame: Array<{ id: string }>
+      }
+    }
+
+    expect(payload.presence.playersOnlineNow).toBe(3)
+    expect(payload.presence.playersSearchingNow).toBe(2)
+    expect(payload.presence.estimatedWaitSeconds).toBe(12)
+    expect(payload.presence.availableNow.some((entry) => entry.userId === 'auth0|u2')).toBe(true)
+    expect(payload.presence.friendsOnline.some((entry) => entry.userId === 'auth0|u2')).toBe(true)
+    expect(payload.presence.joinNextGame).toHaveLength(1)
+  })
+
+  it('excludes stale seats from presence online lists', async () => {
+    const now = Date.now()
+    const staleIso = new Date(now - 20 * 60 * 1000).toISOString()
+    const freshIso = new Date(now - 30 * 1000).toISOString()
+
+    db.dice_sessions.push(
+      {
+        id: 'session-fresh',
+        status: 'lobby',
+        updated_at: freshIso,
+      },
+      {
+        id: 'session-stale',
+        status: 'lobby',
+        updated_at: staleIso,
+      },
+    )
+
+    db.dice_player_profiles.push(
+      {
+        user_id: 'auth0|u1',
+        display_name: 'Pilot One',
+      },
+      {
+        user_id: 'auth0|u2',
+        display_name: 'Pilot Two',
+      },
+      {
+        user_id: 'auth0|u3',
+        display_name: 'Pilot Three',
+      },
+    )
+
+    db.dice_player_seats.push(
+      {
+        session_id: 'session-fresh',
+        user_id: 'auth0|u1',
+        connected: true,
+        is_ai: false,
+        updated_at: freshIso,
+      },
+      {
+        session_id: 'session-fresh',
+        user_id: 'auth0|u2',
+        connected: true,
+        is_ai: false,
+        updated_at: freshIso,
+      },
+      {
+        session_id: 'session-stale',
+        user_id: 'auth0|u3',
+        connected: true,
+        is_ai: false,
+        updated_at: staleIso,
+      },
+    )
+
+    const presenceRes = createMockRes()
+    await presenceHandler(createMockReq({ method: 'GET' }), presenceRes)
+
+    expect(presenceRes.getResult().statusCode).toBe(200)
+    const payload = presenceRes.getResult().payload as {
+      presence: {
+        playersOnlineNow: number
+        availableNow: Array<{ userId: string }>
+      }
+    }
+
+    expect(payload.presence.playersOnlineNow).toBe(2)
+    expect(payload.presence.availableNow.some((entry) => entry.userId === 'auth0|u3')).toBe(false)
+    expect(payload.presence.availableNow.some((entry) => entry.userId === 'auth0|u2')).toBe(true)
   })
 
   it('meets concurrent-session soak error budget under sustained parallel activity', async () => {

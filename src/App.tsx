@@ -32,11 +32,13 @@ import {
   PLAYER_AVATAR_FALLBACK_SRC,
 } from './multiplayer/avatarCatalog'
 import { getAuth0EnvConfig } from './multiplayer/env'
+import { getUnifiedPlayFeatureFlags } from './multiplayer/env'
 import { createSessionRealtimeController, type SessionRealtimeController } from './multiplayer/realtime'
 import type { RealtimeEvent, SessionLifecycleAck, SessionSnapshot, TurnAck } from './multiplayer/types'
 
 const HELP_STORAGE_KEY = 'dice-odysseys-help-open'
 const HOME_MODE_STORAGE_KEY = 'dice-odysseys-home-mode'
+const PRESENCE_VISIBILITY_STORAGE_KEY = 'dice-odysseys-presence-visibility'
 const AI_THINK_DELAY_MS = 600
 const RESOLVE_STAGE_DELAY_MS = 240
 const REDUCED_MOTION_STAGE_DELAY_MS = 80
@@ -47,6 +49,7 @@ const MACGUFFIN_TOKEN_ICON = '/assets/ui/icon-macguffin-token.png'
 const HUMAN_WIN_CELEBRATION_MS = 4200
 const HUMAN_WIN_REDUCED_MOTION_MS = 2400
 const HUMAN_WIN_SCROLL_LEAD_MS = 260
+const QUICK_ONLINE_AUTOFILL_TIMEOUT_MS = 12000
 const SHOW_DEBUG_CONTROLS = /^(1|true)$/i.test(import.meta.env.VITE_SHOW_DEBUG_CONTROLS ?? '')
 
 const humanWinConfetti = [
@@ -69,6 +72,20 @@ const humanWinConfetti = [
 ]
 
 type ResolveAnimationVariant = 'rolling' | 'skip'
+type PresenceVisibility = 'discoverable' | 'friends-only' | 'private'
+type HybridSeatMode = 'auto' | 'human' | 'ai'
+type MatchStartState =
+  | 'IDLE'
+  | 'LOCKING_PLAN'
+  | 'SEARCHING_PLAYERS'
+  | 'SEAT_UPDATE'
+  | 'MATCH_FOUND'
+  | 'AUTO_FILLING_AI'
+  | 'WAITING_USER_DECISION'
+  | 'STARTING'
+  | 'ENTERED_MATCH'
+  | 'CANCELLED'
+  | 'ERROR'
 
 interface ActiveOpponent {
   id: string
@@ -80,6 +97,29 @@ interface ActiveOpponent {
 interface SocialUserEntry {
   userId: string
   displayName: string
+}
+
+interface PresenceDirectoryEntry {
+  userId: string
+  displayName: string
+  status?: 'Available' | 'In Lobby' | 'In Match'
+  sessionId?: string
+}
+
+interface PresenceSnapshotPayload {
+  viewerVisibility?: PresenceVisibility
+  playersOnlineNow: number
+  playersSearchingNow: number
+  estimatedWaitSeconds?: number
+  region?: string
+  availableNow?: PresenceDirectoryEntry[]
+  friendsOnline?: SocialUserEntry[]
+  joinNextGame?: Array<{
+    id: string
+    sessionId: string
+    fromDisplayName?: string
+    expiresAt?: string
+  }>
 }
 
 interface PartyInviteEntry {
@@ -189,6 +229,12 @@ const logAutofillDebug = (...args: unknown[]) => {
   }
 }
 
+const logPresenceDebug = (...args: unknown[]) => {
+  if (import.meta.env.DEV) {
+    console.debug(...args)
+  }
+}
+
 function App() {
   const {
     isAuthenticated,
@@ -225,10 +271,26 @@ function App() {
   const [onlineSnapshot, setOnlineSnapshot] = useState<SessionSnapshot | null>(null)
   const [onlineStatusMessage, setOnlineStatusMessage] = useState<string | null>(null)
   const [onlineError, setOnlineError] = useState<string | null>(null)
+  const [matchStartState, setMatchStartState] = useState<MatchStartState>('IDLE')
+  const [quickOnlineFlowActive, setQuickOnlineFlowActive] = useState(false)
+  const [quickOnlineRetryKey, setQuickOnlineRetryKey] = useState(0)
+  const [presenceVisibility, setPresenceVisibility] = useState<PresenceVisibility>(() => {
+    if (typeof window === 'undefined') {
+      return 'discoverable'
+    }
+
+    const stored = window.localStorage.getItem(PRESENCE_VISIBILITY_STORAGE_KEY)
+    if (stored === 'discoverable' || stored === 'friends-only' || stored === 'private') {
+      return stored
+    }
+
+    return 'discoverable'
+  })
   const [onlineSubmitting, setOnlineSubmitting] = useState(false)
   const [onlineLifecycleSubmitting, setOnlineLifecycleSubmitting] = useState(false)
   const [onlineInviteCode, setOnlineInviteCode] = useState<string | null>(null)
   const [onlineInviteExpiry, setOnlineInviteExpiry] = useState<string | null>(null)
+  const [hybridSlotPlan, setHybridSlotPlan] = useState<HybridSeatMode[]>(['auto', 'auto', 'auto'])
   const [onlineJoinCode, setOnlineJoinCode] = useState('')
   const [joinLinkProcessing, setJoinLinkProcessing] = useState(false)
   const [friendTargetDisplayName, setFriendTargetDisplayName] = useState('')
@@ -240,6 +302,7 @@ function App() {
   const [sentPartyInvites, setSentPartyInvites] = useState<PartyInviteEntry[]>([])
   const [socialLoading, setSocialLoading] = useState(false)
   const [profileDisplayName, setProfileDisplayName] = useState<string | null>(null)
+  const [presenceSnapshot, setPresenceSnapshot] = useState<PresenceSnapshotPayload | null>(null)
 
   const auth0Audience = useMemo(() => {
     try {
@@ -248,6 +311,8 @@ function App() {
       return undefined
     }
   }, [])
+
+  const unifiedPlayFeatureFlags = useMemo(() => getUnifiedPlayFeatureFlags(), [])
 
   const getApiAccessToken = useCallback(async () => {
     const token = await getAccessTokenSilently(
@@ -268,6 +333,7 @@ function App() {
   const onlineRealtimeRef = useRef<SessionRealtimeController | null>(null)
   const onlineSessionGuardRef = useRef<string | null>(null)
   const joinLinkHandledRef = useRef<string | null>(null)
+  const matchStartStateRef = useRef<MatchStartState>('IDLE')
   const [helpOpen, setHelpOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
       return false
@@ -293,6 +359,45 @@ function App() {
           : playbackStage === 'post'
             ? 'Applying post effects...'
             : authoritativeState.turnResolution.message
+
+  const trackUnifiedPlayEvent = useCallback((eventName: string, payload: Record<string, unknown> = {}) => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('diceodyssey:telemetry', {
+          detail: {
+            eventName,
+            ...payload,
+            at: new Date().toISOString(),
+          },
+        }),
+      )
+    }
+
+    if (import.meta.env.DEV) {
+      console.info('[telemetry]', eventName, payload)
+    }
+  }, [])
+
+  const setMatchStartStateTracked = useCallback(
+    (next: MatchStartState, payload: Record<string, unknown> = {}) => {
+      const previous = matchStartStateRef.current
+      if (previous !== next) {
+        trackUnifiedPlayEvent('match_start_state_changed', {
+          fromState: previous,
+          toState: next,
+          ...payload,
+        })
+      }
+
+      matchStartStateRef.current = next
+      setMatchStartState(next)
+    },
+    [trackUnifiedPlayEvent],
+  )
+
+  useEffect(() => {
+    matchStartStateRef.current = matchStartState
+  }, [matchStartState])
 
   const clearResolutionTimers = useCallback(() => {
     resolutionTimersRef.current.forEach((timer) => window.clearTimeout(timer))
@@ -348,6 +453,14 @@ function App() {
 
     window.localStorage.setItem(HOME_MODE_STORAGE_KEY, mode)
   }, [mode])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.setItem(PRESENCE_VISIBILITY_STORAGE_KEY, presenceVisibility)
+  }, [presenceVisibility])
 
   useEffect(() => {
     setHotseatNames(buildDefaultHotseatNames(hotseatCount))
@@ -512,6 +625,161 @@ function App() {
       (onlineStatusMessage.includes('Opponent left the match.') ||
         onlineStatusMessage.includes('Match ended because a player left.')),
   )
+  const matchmakingRegionLabel = useMemo(() => {
+    if (presenceSnapshot?.region) {
+      return presenceSnapshot.region
+    }
+
+    if (typeof Intl === 'undefined') {
+      return 'Global'
+    }
+
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (!zone) {
+      return 'Global'
+    }
+
+    const pieces = zone.split('/')
+    return pieces[pieces.length - 1]?.replace(/_/g, ' ') ?? 'Global'
+  }, [presenceSnapshot?.region])
+
+  const playersOnlineNowCount = useMemo(() => {
+    if (typeof presenceSnapshot?.playersOnlineNow === 'number') {
+      return presenceSnapshot.playersOnlineNow
+    }
+
+    const connectedInSession = onlineSnapshot?.playerSeats.filter((seat) => seat.connected).length ?? 0
+    return Math.max(connectedInSession, friends.length)
+  }, [friends.length, onlineSnapshot, presenceSnapshot?.playersOnlineNow])
+
+  const playersSearchingNowCount = useMemo(() => {
+    if (typeof presenceSnapshot?.playersSearchingNow === 'number') {
+      return presenceSnapshot.playersSearchingNow
+    }
+
+    if (!quickOnlineFlowActive || onlineSessionId) {
+      return 0
+    }
+
+    return 1
+  }, [onlineSessionId, presenceSnapshot?.playersSearchingNow, quickOnlineFlowActive])
+
+  const estimatedWaitLabel = useMemo(() => {
+    if (typeof presenceSnapshot?.estimatedWaitSeconds === 'number') {
+      return `~${presenceSnapshot.estimatedWaitSeconds}s`
+    }
+
+    if (quickOnlineFlowActive && !onlineSessionId) {
+      return '~12s'
+    }
+
+    if (mode === 'multiplayer') {
+      return '<30s'
+    }
+
+    return '—'
+  }, [mode, onlineSessionId, presenceSnapshot?.estimatedWaitSeconds, quickOnlineFlowActive])
+
+  const availableNowPlayers = useMemo(
+    () => {
+      if (presenceSnapshot?.availableNow?.length) {
+        const uniquePlayers = new Map<string, (typeof presenceSnapshot.availableNow)[number]>()
+
+        for (const entry of presenceSnapshot.availableNow) {
+          if (!entry.userId) {
+            continue
+          }
+
+          if (!uniquePlayers.has(entry.userId)) {
+            uniquePlayers.set(entry.userId, entry)
+          }
+        }
+
+        if (presenceSnapshot.availableNow.length !== uniquePlayers.size) {
+          logPresenceDebug('[presence] deduplicated availableNow entries', {
+            before: presenceSnapshot.availableNow.length,
+            after: uniquePlayers.size,
+          })
+        }
+
+        return Array.from(uniquePlayers.values()).slice(0, 3)
+      }
+
+      const uniqueByUserId = new Map<string, {
+        userId: string
+        displayName: string
+        status: 'Available' | 'In Match'
+        sessionId?: string
+      }>()
+
+      ;(onlineSnapshot?.playerSeats ?? [])
+        .filter((seat) => seat.connected && seat.userId !== multiplayerIdentity?.userId)
+        .forEach((seat) => {
+          if (!uniqueByUserId.has(seat.userId)) {
+            uniqueByUserId.set(seat.userId, {
+              userId: seat.userId,
+              displayName: seat.displayName,
+              status: seat.connected ? 'Available' : 'In Match',
+              sessionId: onlineSessionId ?? undefined,
+            })
+          }
+        })
+
+      return Array.from(uniqueByUserId.values()).slice(0, 3)
+    },
+    [multiplayerIdentity?.userId, onlineSessionId, onlineSnapshot, presenceSnapshot?.availableNow],
+  )
+
+  const friendsOnlineEntries = useMemo(() => {
+    if (presenceSnapshot?.friendsOnline?.length) {
+      return presenceSnapshot.friendsOnline.slice(0, 3)
+    }
+
+    return friends.slice(0, 3)
+  }, [friends, presenceSnapshot?.friendsOnline])
+
+  const joinNextGameEntries = useMemo(() => {
+    if (presenceSnapshot?.joinNextGame?.length) {
+      return presenceSnapshot.joinNextGame.slice(0, 3)
+    }
+
+    return receivedPartyInvites
+      .filter((invite) => invite.status === 'pending')
+      .slice(0, 3)
+      .map((invite) => ({
+        id: invite.id,
+        sessionId: invite.sessionId,
+        fromDisplayName: invite.fromDisplayName,
+        expiresAt: invite.expiresAt,
+      }))
+  }, [presenceSnapshot?.joinNextGame, receivedPartyInvites])
+
+  const hybridSlotSummary = useMemo(() => {
+    const counts = hybridSlotPlan.reduce(
+      (accumulator, value) => {
+        if (value === 'human') {
+          accumulator.human += 1
+        } else if (value === 'ai') {
+          accumulator.ai += 1
+        } else {
+          accumulator.auto += 1
+        }
+
+        return accumulator
+      },
+      {
+        human: 0,
+        ai: 0,
+        auto: 0,
+      },
+    )
+
+    return `${counts.human} Human • ${counts.ai} AI • ${counts.auto} Auto`
+  }, [hybridSlotPlan])
+
+  const handleHybridSlotModeChange = useCallback((slotIndex: number, nextMode: HybridSeatMode) => {
+    setHybridSlotPlan((previous) => previous.map((value, index) => (index === slotIndex ? nextMode : value)))
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -600,17 +868,50 @@ function App() {
     setOnlineLifecycleSubmitting(false)
     setOnlineInviteCode(null)
     setOnlineInviteExpiry(null)
+    setQuickOnlineFlowActive(false)
+    setQuickOnlineRetryKey(0)
+    setMatchStartStateTracked('IDLE')
+  }, [setMatchStartStateTracked])
+
+  const clearOnlineContextForOfflineStart = useCallback(() => {
+    onlineSessionGuardRef.current = null
+
+    if (onlineRealtimeRef.current) {
+      void onlineRealtimeRef.current.disconnect()
+      onlineRealtimeRef.current = null
+    }
+
+    setOnlineSnapshot(null)
+    setOnlineSessionId(null)
+    setOnlineJoinSessionId('')
+    setOnlineJoinCode('')
+    setOnlineSubmitting(false)
+    setOnlineLifecycleSubmitting(false)
+    setOnlineInviteCode(null)
+    setOnlineInviteExpiry(null)
   }, [])
 
-  const handleStartOnlineMatch = useCallback(async () => {
+  const handleStartOnlineMatch = useCallback(async (entryPoint: 'FAST_ONLINE' | 'MANUAL_MULTIPLAYER' = 'MANUAL_MULTIPLAYER') => {
+    if (entryPoint === 'MANUAL_MULTIPLAYER') {
+      trackUnifiedPlayEvent('play_start_clicked', {
+        entryPoint,
+      })
+    }
+
     if (!multiplayerEligibility.eligible) {
       setOnlineError('Login is required before starting an online match.')
+      setMatchStartStateTracked('ERROR', { reason: 'NOT_ELIGIBLE', entryPoint })
+      trackUnifiedPlayEvent('match_start_error', {
+        entryPoint,
+        reason: 'NOT_ELIGIBLE',
+      })
       return
     }
 
     try {
       setOnlineError(null)
       setOnlineStatusMessage('Finding match...')
+      setMatchStartStateTracked('SEARCHING_PLAYERS', { entryPoint })
 
       const token = await getApiAccessToken()
       const response = await fetch('/api/matchmaking/queue', {
@@ -626,7 +927,9 @@ function App() {
 
       const body = (await response.json()) as { sessionId: string }
       setOnlineSessionId(body.sessionId)
+  setMatchStartStateTracked('MATCH_FOUND', { entryPoint, sessionId: body.sessionId })
       await connectOnlineSession(body.sessionId)
+  setMatchStartStateTracked('SEAT_UPDATE', { entryPoint, sessionId: body.sessionId })
 
       const inviteToken = await getApiAccessToken()
       const inviteResponse = await fetch('/api/sessions/invite-code', {
@@ -652,8 +955,19 @@ function App() {
     } catch (error) {
       setOnlineError(error instanceof Error ? error.message : 'Failed to start online match.')
       setOnlineStatusMessage(null)
+      setMatchStartStateTracked('ERROR', { entryPoint })
+      trackUnifiedPlayEvent('match_start_error', {
+        entryPoint,
+        reason: error instanceof Error ? error.message : 'UNKNOWN_ERROR',
+      })
     }
-  }, [connectOnlineSession, getApiAccessToken, multiplayerEligibility.eligible])
+  }, [
+    connectOnlineSession,
+    getApiAccessToken,
+    multiplayerEligibility.eligible,
+    setMatchStartStateTracked,
+    trackUnifiedPlayEvent,
+  ])
 
   const handleJoinOnlineMatch = useCallback(async () => {
     if (!multiplayerEligibility.eligible) {
@@ -817,7 +1131,7 @@ function App() {
       setSocialLoading(true)
       const token = await getApiAccessToken()
 
-      const [friendsResponse, invitesResponse] = await Promise.all([
+      const [friendsResponse, invitesResponse, presenceResponse] = await Promise.all([
         fetch('/api/friends/list', {
           method: 'GET',
           headers: {
@@ -825,6 +1139,12 @@ function App() {
           },
         }),
         fetch('/api/sessions/party-invites', {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+        fetch('/api/matchmaking/presence', {
           method: 'GET',
           headers: {
             Authorization: `Bearer ${token}`,
@@ -851,6 +1171,18 @@ function App() {
         sent?: PartyInviteEntry[]
       }
 
+      if (presenceResponse.ok) {
+        const presenceBody = (await presenceResponse.json()) as {
+          presence?: PresenceSnapshotPayload
+        }
+        setPresenceSnapshot(presenceBody.presence ?? null)
+        if (presenceBody.presence?.viewerVisibility) {
+          setPresenceVisibility(presenceBody.presence.viewerVisibility)
+        }
+      } else {
+        setPresenceSnapshot(null)
+      }
+
       setFriends(friendsBody.friends ?? [])
       setIncomingFriendRequests(friendsBody.incomingRequests ?? [])
       setOutgoingFriendRequests(friendsBody.outgoingRequests ?? [])
@@ -862,6 +1194,74 @@ function App() {
       setSocialLoading(false)
     }
   }, [getApiAccessToken, multiplayerEligibility.eligible])
+
+  const handleModerationAction = useCallback(
+    async (targetDisplayName: string, action: 'BLOCK' | 'MUTE' | 'REPORT') => {
+      if (!multiplayerEligibility.eligible) {
+        setOnlineError('Login is required before moderation actions.')
+        return
+      }
+
+      try {
+        setOnlineError(null)
+        const token = await getApiAccessToken()
+        const response = await fetch('/api/friends/moderate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            targetDisplayName,
+            action,
+          }),
+        })
+
+        if (!response.ok) {
+          throw new Error(await buildApiErrorMessage(response, 'Moderation action failed'))
+        }
+
+        setOnlineStatusMessage(`${action} requested for ${targetDisplayName}.`)
+        await refreshSocialData()
+      } catch (error) {
+        setOnlineError(error instanceof Error ? error.message : 'Moderation action failed.')
+      }
+    },
+    [getApiAccessToken, multiplayerEligibility.eligible, refreshSocialData],
+  )
+
+  const handlePresenceVisibilityChange = useCallback(
+    async (visibility: PresenceVisibility) => {
+      if (!multiplayerEligibility.eligible) {
+        setPresenceVisibility(visibility)
+        return
+      }
+
+      try {
+        const token = await getApiAccessToken()
+        const response = await fetch('/api/profile/visibility', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ visibility }),
+        })
+
+        if (!response.ok) {
+          throw new Error(await buildApiErrorMessage(response, 'Failed to update visibility'))
+        }
+
+        setPresenceVisibility(visibility)
+        setOnlineError(null)
+        setOnlineStatusMessage(`Presence visibility set to ${visibility}.`)
+        await refreshSocialData()
+      } catch (error) {
+        setOnlineError(error instanceof Error ? error.message : 'Failed to update visibility.')
+      }
+    },
+    [getApiAccessToken, multiplayerEligibility.eligible, refreshSocialData],
+  )
 
   const handleSendFriendRequest = useCallback(async () => {
     if (!multiplayerEligibility.eligible) {
@@ -1070,6 +1470,7 @@ function App() {
       setOutgoingFriendRequests([])
       setReceivedPartyInvites([])
       setSentPartyInvites([])
+      setPresenceSnapshot(null)
       return
     }
 
@@ -1423,6 +1824,202 @@ function App() {
     })
   }
 
+  const handleStartInstantAdventure = useCallback(() => {
+    const instantName = (profileDisplayName?.trim() || humanName.trim() || 'Captain')
+
+    trackUnifiedPlayEvent('play_start_clicked', {
+      entryPoint: 'INSTANT_ADVENTURE',
+      aiCount: 2,
+      difficulty: 'medium',
+    })
+
+    setQuickOnlineFlowActive(false)
+    clearOnlineContextForOfflineStart()
+    setMode('single')
+    setDifficulty('medium')
+    setAiCount(2)
+    setOnlineError(null)
+    setOnlineStatusMessage('Launching Instant Adventure...')
+    setMatchStartStateTracked('ENTERED_MATCH', { entryPoint: 'INSTANT_ADVENTURE' })
+
+    dispatch({
+      type: 'INIT_GAME',
+      payload: {
+        mode: 'single',
+        humanNames: [instantName],
+        aiCount: 2,
+        difficulty: 'medium',
+        debugEnabled,
+        animationEnabled,
+      },
+    })
+    trackUnifiedPlayEvent('match_entered', {
+      entryPoint: 'INSTANT_ADVENTURE',
+      humanCount: 1,
+      aiCount: 2,
+    })
+  }, [
+    animationEnabled,
+    clearOnlineContextForOfflineStart,
+    debugEnabled,
+    humanName,
+    profileDisplayName,
+    setMatchStartStateTracked,
+    trackUnifiedPlayEvent,
+  ])
+
+  const handleStartQuickOnline = useCallback(async () => {
+    trackUnifiedPlayEvent('play_start_clicked', {
+      entryPoint: 'FAST_ONLINE',
+    })
+
+    setQuickOnlineFlowActive(true)
+    setQuickOnlineRetryKey((value) => value + 1)
+    setMode('multiplayer')
+    setOnlineError(null)
+    setOnlineStatusMessage('Finding a quick online match...')
+    setMatchStartStateTracked('LOCKING_PLAN', { entryPoint: 'FAST_ONLINE' })
+    await handleStartOnlineMatch('FAST_ONLINE')
+  }, [handleStartOnlineMatch, setMatchStartStateTracked, trackUnifiedPlayEvent])
+
+  const handlePlayWithFriendsEntry = useCallback(() => {
+    trackUnifiedPlayEvent('play_start_clicked', {
+      entryPoint: 'PLAY_WITH_FRIENDS',
+    })
+
+    setQuickOnlineFlowActive(false)
+    setQuickOnlineRetryKey(0)
+    setMode('multiplayer')
+    setOnlineError(null)
+    setOnlineStatusMessage('Use invite code or social panels below to play with friends.')
+    setMatchStartStateTracked('IDLE')
+  }, [setMatchStartStateTracked, trackUnifiedPlayEvent])
+
+  const handleCustomSetupEntry = useCallback(() => {
+    trackUnifiedPlayEvent('play_start_clicked', {
+      entryPoint: 'CUSTOM_SETUP',
+    })
+
+    setQuickOnlineFlowActive(false)
+    setQuickOnlineRetryKey(0)
+    setOnlineError(null)
+    setOnlineStatusMessage('Customize your match setup using the options below.')
+    setMatchStartStateTracked('IDLE')
+  }, [setMatchStartStateTracked, trackUnifiedPlayEvent])
+
+  const handleKeepWaitingQuickOnline = useCallback(() => {
+    setOnlineError(null)
+    setOnlineStatusMessage('Continuing to search for players...')
+    setMatchStartStateTracked('SEARCHING_PLAYERS', {
+      entryPoint: 'FAST_ONLINE',
+      reason: 'KEEP_WAITING',
+    })
+    setQuickOnlineRetryKey((value) => value + 1)
+  }, [setMatchStartStateTracked])
+
+  const handleStartWithAiFallback = useCallback(() => {
+    trackUnifiedPlayEvent('auto_fill_triggered', {
+      reason: 'user_choice',
+      entryPoint: 'FAST_ONLINE',
+      openSeatCount: 1,
+    })
+
+    setMatchStartStateTracked('AUTO_FILLING_AI', {
+      entryPoint: 'FAST_ONLINE',
+      reason: 'USER_CHOICE',
+    })
+    setOnlineStatusMessage('No full lobby yet—starting instantly with AI.')
+
+    window.setTimeout(() => {
+      setMatchStartStateTracked('STARTING', {
+        entryPoint: 'FAST_ONLINE',
+      })
+      handleStartInstantAdventure()
+    }, 220)
+  }, [handleStartInstantAdventure, setMatchStartStateTracked, trackUnifiedPlayEvent])
+
+  useEffect(() => {
+    if (!quickOnlineFlowActive) {
+      return
+    }
+
+    if (onlineSnapshot?.gameState.started) {
+      return
+    }
+
+    if (
+      matchStartState !== 'LOCKING_PLAN' &&
+      matchStartState !== 'SEARCHING_PLAYERS' &&
+      matchStartState !== 'SEAT_UPDATE'
+    ) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      const connectedHumanSeats = onlineSnapshot?.playerSeats.filter((seat) => !seat.isAI && seat.connected).length ?? 1
+      const openSeatCount = Math.max(1, 2 - connectedHumanSeats)
+
+      trackUnifiedPlayEvent('auto_fill_triggered', {
+        reason: 'timeout',
+        entryPoint: 'FAST_ONLINE',
+        openSeatCount,
+        sessionId: onlineSessionId ?? undefined,
+      })
+
+      setMatchStartStateTracked('WAITING_USER_DECISION', {
+        entryPoint: 'FAST_ONLINE',
+        timeoutMs: QUICK_ONLINE_AUTOFILL_TIMEOUT_MS,
+        sessionId: onlineSessionId ?? undefined,
+      })
+
+      setOnlineStatusMessage('One seat still needs a player. Start with AI now or keep waiting.')
+    }, QUICK_ONLINE_AUTOFILL_TIMEOUT_MS)
+
+    return () => window.clearTimeout(timer)
+  }, [
+    matchStartState,
+    onlineSessionId,
+    onlineSnapshot,
+    quickOnlineFlowActive,
+    quickOnlineRetryKey,
+    setMatchStartStateTracked,
+    trackUnifiedPlayEvent,
+  ])
+
+  useEffect(() => {
+    if (!quickOnlineFlowActive || !onlineSessionId || !onlineSnapshot) {
+      return
+    }
+
+    if (!onlineSnapshot.gameState.started) {
+      setMatchStartStateTracked('SEAT_UPDATE', {
+        sessionId: onlineSessionId,
+        version: onlineSnapshot.version,
+      })
+      return
+    }
+
+    setMatchStartStateTracked('STARTING', {
+      sessionId: onlineSessionId,
+      version: onlineSnapshot.version,
+    })
+
+    const timer = window.setTimeout(() => {
+      setMatchStartStateTracked('ENTERED_MATCH', {
+        sessionId: onlineSessionId,
+        version: onlineSnapshot.version,
+      })
+      trackUnifiedPlayEvent('match_entered', {
+        entryPoint: 'FAST_ONLINE',
+        sessionId: onlineSessionId,
+        humanCount: onlineSnapshot.playerSeats.filter((seat) => !seat.isAI).length,
+        aiCount: onlineSnapshot.playerSeats.filter((seat) => seat.isAI).length,
+      })
+    }, 220)
+
+    return () => window.clearTimeout(timer)
+  }, [onlineSessionId, onlineSnapshot, quickOnlineFlowActive, setMatchStartStateTracked, trackUnifiedPlayEvent])
+
   const handleEndTurn = () => {
     if (!currentPlayer || currentPlayer.isAI || isResolving) {
       return
@@ -1552,6 +2149,11 @@ function App() {
           body: JSON.stringify({
             sessionId,
             clientRequestId: crypto.randomUUID(),
+            ...(action === 'REMATCH' && unifiedPlayFeatureFlags.hybridRematchReplacementV1
+              ? {
+                  seatPlan: hybridSlotPlan,
+                }
+              : {}),
           }),
         })
 
@@ -1571,7 +2173,13 @@ function App() {
         }
 
         if (!response.ok || !ack?.accepted) {
-          setOnlineError(ack?.reason ?? `${action} failed (${response.status}).`)
+          if (ack?.reason === 'REMATCH_SEAT_LOCKED') {
+            setOnlineError('Cannot start rematch: one or more Human-only seats are not connected.')
+          } else if (ack?.reason === 'REMATCH_INVALID_PLAN') {
+            setOnlineError('Rematch seat plan is invalid. Refresh and try again.')
+          } else {
+            setOnlineError(ack?.reason ?? `${action} failed (${response.status}).`)
+          }
           if (response.status === 409 || response.status === 403) {
             await refreshOnlineSnapshot()
           }
@@ -1603,7 +2211,15 @@ function App() {
         setOnlineLifecycleSubmitting(false)
       }
     },
-    [detachOnlineSession, getApiAccessToken, multiplayerIdentity, onlineSessionId, refreshOnlineSnapshot],
+    [
+      detachOnlineSession,
+      getApiAccessToken,
+      hybridSlotPlan,
+      multiplayerIdentity,
+      onlineSessionId,
+      refreshOnlineSnapshot,
+      unifiedPlayFeatureFlags.hybridRematchReplacementV1,
+    ],
   )
 
   const handleResign = useCallback(() => {
@@ -1672,6 +2288,8 @@ function App() {
     setOnlineLifecycleSubmitting(false)
     setOnlineInviteCode(null)
     setOnlineInviteExpiry(null)
+    setQuickOnlineFlowActive(false)
+    setMatchStartStateTracked('IDLE')
 
     if (onlineRealtimeRef.current) {
       void onlineRealtimeRef.current.disconnect()
@@ -1679,6 +2297,45 @@ function App() {
     }
 
     dispatch({ type: 'NEW_GAME' })
+  }
+
+  const matchStartStateCopy: Partial<Record<MatchStartState, { title: string; detail: string }>> = {
+    LOCKING_PLAN: {
+      title: 'Preparing your match...',
+      detail: 'Saving your seat plan and checking availability.',
+    },
+    SEARCHING_PLAYERS: {
+      title: 'Finding players...',
+      detail: 'We will auto-fill AI if needed to keep startup fast.',
+    },
+    SEAT_UPDATE: {
+      title: 'Seats updating',
+      detail: 'Players are joining your match now.',
+    },
+    MATCH_FOUND: {
+      title: 'Match found!',
+      detail: 'Finalizing seats and loading game.',
+    },
+    AUTO_FILLING_AI: {
+      title: 'No problem—adding AI captains',
+      detail: 'Missing seats are being filled so you can start now.',
+    },
+    WAITING_USER_DECISION: {
+      title: 'One seat still needs a player',
+      detail: 'Choose to keep waiting or launch with AI.',
+    },
+    STARTING: {
+      title: 'Launching match...',
+      detail: 'Syncing final session state.',
+    },
+    ENTERED_MATCH: {
+      title: 'Connected',
+      detail: 'You are in the match.',
+    },
+    ERROR: {
+      title: 'Could not start match',
+      detail: 'Check your connection and try again.',
+    },
   }
 
   const handleDownloadDebugLog = () => {
@@ -1863,6 +2520,56 @@ function App() {
             </p>
           </div>
 
+          {unifiedPlayFeatureFlags.unifiedPlayV1 && (
+            <section className="mt-6 rounded-xl border border-cyan-500/50 bg-cyan-950/20 p-4">
+            <h2 className="text-lg font-semibold text-cyan-100">Choose your next mission</h2>
+            <p className="mt-1 text-sm text-cyan-50/90">Start instantly with AI, or jump online in seconds.</p>
+
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              <button
+                type="button"
+                className="rounded-lg border border-cyan-300/70 bg-cyan-900/30 px-4 py-3 text-left text-cyan-50"
+                onClick={handleStartInstantAdventure}
+              >
+                <p className="text-sm font-semibold">Instant Adventure</p>
+                <p className="mt-1 text-xs text-cyan-100/90">Start now vs AI rivals. No waiting.</p>
+              </button>
+
+              <button
+                type="button"
+                className="rounded-lg border border-emerald-300/70 bg-emerald-900/30 px-4 py-3 text-left text-emerald-50 disabled:opacity-50"
+                onClick={handleStartQuickOnline}
+                disabled={!multiplayerEligibility.eligible || isOnlineMode}
+              >
+                <p className="text-sm font-semibold">Quick Online Match</p>
+                <p className="mt-1 text-xs text-emerald-100/90">Find players fast. Auto-fill AI if needed.</p>
+              </button>
+
+              <button
+                type="button"
+                className="rounded-lg border border-slate-400/70 bg-slate-900/60 px-4 py-3 text-left text-slate-100"
+                onClick={handlePlayWithFriendsEntry}
+              >
+                <p className="text-sm font-semibold">Play With Friends</p>
+                <p className="mt-1 text-xs text-slate-300">Invite by code or pick friends.</p>
+              </button>
+
+              <button
+                type="button"
+                className="rounded-lg border border-slate-400/70 bg-slate-900/60 px-4 py-3 text-left text-slate-100"
+                onClick={handleCustomSetupEntry}
+              >
+                <p className="text-sm font-semibold">Custom Setup</p>
+                <p className="mt-1 text-xs text-slate-300">Choose every opponent and slot.</p>
+              </button>
+            </div>
+
+            {!multiplayerEligibility.eligible && (
+              <p className="mt-2 text-xs text-slate-300">Log in on Profile to enable online quick match and friend play.</p>
+            )}
+            </section>
+          )}
+
           <div className="mt-6 grid gap-3 lg:grid-cols-4">
             <label className="flex flex-col gap-1 text-sm text-slate-200">
               Mode
@@ -2000,8 +2707,232 @@ function App() {
             )}
           </div>
 
-          {mode === 'multiplayer' && (onlineStatusMessage || onlineError || onlineSessionId) && (
+          {mode === 'multiplayer' && unifiedPlayFeatureFlags.hybridRematchReplacementV1 && (
+            <section className="mt-3 space-y-2 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-200">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-cyan-100">Hybrid slot planner (MVP)</p>
+                <p className="text-[11px] text-slate-300">{hybridSlotSummary}</p>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-3">
+                {hybridSlotPlan.map((slotMode, index) => (
+                  <label key={`hybrid-slot-${index + 1}`} className="flex flex-col gap-1 rounded border border-slate-700 bg-slate-950/40 p-2">
+                    <span className="text-[11px] text-slate-300">Seat {index + 1}</span>
+                    <select
+                      className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+                      value={slotMode}
+                      onChange={(event) => handleHybridSlotModeChange(index, event.target.value as HybridSeatMode)}
+                    >
+                      <option value="auto">Auto</option>
+                      <option value="human">Human only</option>
+                      <option value="ai">AI only</option>
+                    </select>
+                  </label>
+                ))}
+              </div>
+
+              <p className="text-[11px] text-slate-400">
+                Planner is active for UI flow now; seat enforcement lands with rematch lobby wiring.
+              </p>
+            </section>
+          )}
+
+          {mode === 'multiplayer' && multiplayerEligibility.eligible && unifiedPlayFeatureFlags.presenceDirectoryV1 && (
+            <section className="mt-3 space-y-3 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-200">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-700 bg-slate-950/50 px-2 py-1.5">
+                <p className="text-[11px] text-slate-300">Presence visibility</p>
+                <select
+                  className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-[11px] text-slate-100"
+                  value={presenceVisibility}
+                  onChange={(event) => {
+                    void handlePresenceVisibilityChange(event.target.value as PresenceVisibility)
+                  }}
+                >
+                  <option value="discoverable">Discoverable</option>
+                  <option value="friends-only">Friends-only discoverable</option>
+                  <option value="private">Private</option>
+                </select>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded border border-slate-700 bg-slate-950/50 px-2 py-1.5">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Players online now</p>
+                  <p className="mt-0.5 text-sm font-semibold text-cyan-100">{playersOnlineNowCount}</p>
+                </div>
+                <div className="rounded border border-slate-700 bg-slate-950/50 px-2 py-1.5">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Players searching</p>
+                  <p className="mt-0.5 text-sm font-semibold text-cyan-100">{playersSearchingNowCount}</p>
+                </div>
+                <div className="rounded border border-slate-700 bg-slate-950/50 px-2 py-1.5">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Estimated wait</p>
+                  <p className="mt-0.5 text-sm font-semibold text-cyan-100">{estimatedWaitLabel}</p>
+                </div>
+                <div className="rounded border border-slate-700 bg-slate-950/50 px-2 py-1.5">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Region</p>
+                  <p className="mt-0.5 truncate text-sm font-semibold text-cyan-100">{matchmakingRegionLabel}</p>
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-1 rounded border border-slate-700 bg-slate-950/40 p-2">
+                  <p className="font-semibold text-cyan-200">Available now</p>
+                  {availableNowPlayers.length > 0 ? (
+                    availableNowPlayers.map((seat) => (
+                      <div key={`available-${seat.userId}`} className="space-y-1 rounded border border-slate-700 px-1.5 py-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate">{seat.displayName}</span>
+                          <button
+                            type="button"
+                            className="rounded border border-slate-500 px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
+                            onClick={() => {
+                              setPartyInviteTargetDisplayName(seat.displayName)
+                              setOnlineStatusMessage(`Selected ${seat.displayName} for invite.`)
+                            }}
+                            disabled={!onlineSessionId}
+                          >
+                            Invite
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          <button
+                            type="button"
+                            className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px]"
+                            onClick={() => {
+                              void handleModerationAction(seat.displayName, 'BLOCK')
+                            }}
+                          >
+                            Block
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px]"
+                            onClick={() => {
+                              void handleModerationAction(seat.displayName, 'MUTE')
+                            }}
+                          >
+                            Mute
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px]"
+                            onClick={() => {
+                              void handleModerationAction(seat.displayName, 'REPORT')
+                            }}
+                          >
+                            Report
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-[11px] text-slate-400">No available players right now.</p>
+                  )}
+                </div>
+
+                <div className="space-y-1 rounded border border-slate-700 bg-slate-950/40 p-2">
+                  <p className="font-semibold text-cyan-200">Friends online</p>
+                  {friendsOnlineEntries.map((entry) => (
+                    <div key={`friend-online-${entry.userId}`} className="space-y-1 rounded border border-slate-700 px-1.5 py-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate">{entry.displayName}</span>
+                        <button
+                          type="button"
+                          className="rounded border border-slate-500 px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
+                          onClick={() => {
+                            setPartyInviteTargetDisplayName(entry.displayName)
+                            setOnlineStatusMessage(`Selected ${entry.displayName} for invite.`)
+                          }}
+                          disabled={!onlineSessionId}
+                        >
+                          Invite
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px]"
+                          onClick={() => {
+                            void handleModerationAction(entry.displayName, 'BLOCK')
+                          }}
+                        >
+                          Block
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px]"
+                          onClick={() => {
+                            void handleModerationAction(entry.displayName, 'MUTE')
+                          }}
+                        >
+                          Mute
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px]"
+                          onClick={() => {
+                            void handleModerationAction(entry.displayName, 'REPORT')
+                          }}
+                        >
+                          Report
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {friendsOnlineEntries.length === 0 && <p className="text-[11px] text-slate-400">No friends available yet.</p>}
+                </div>
+
+                <div className="space-y-1 rounded border border-slate-700 bg-slate-950/40 p-2">
+                  <p className="font-semibold text-cyan-200">Join next game</p>
+                  {joinNextGameEntries.map((invite) => (
+                      <div key={`join-next-${invite.id}`} className="flex items-center justify-between gap-2">
+                        <span className="truncate">{invite.fromDisplayName ?? 'Unknown'} lobby</span>
+                        <button
+                          type="button"
+                          className="rounded border border-slate-500 px-2 py-0.5 text-[10px] font-semibold"
+                          onClick={() => {
+                            void handleRespondPartyInvite(invite.id, 'ACCEPT')
+                          }}
+                        >
+                          Join
+                        </button>
+                      </div>
+                    ))}
+                  {joinNextGameEntries.length === 0 && (
+                    <p className="text-[11px] text-slate-400">No rematch lobby invites right now.</p>
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {mode === 'multiplayer' && (onlineStatusMessage || onlineError || onlineSessionId || matchStartState !== 'IDLE') && (
             <div className="mt-3 space-y-2 rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-200">
+              {matchStartState !== 'IDLE' && matchStartStateCopy[matchStartState] && (
+                <div className="rounded-md border border-cyan-400/40 bg-cyan-900/20 px-2 py-1.5">
+                  <p className="font-semibold text-cyan-100">{matchStartStateCopy[matchStartState]?.title}</p>
+                  <p className="mt-0.5 text-cyan-200/90">{matchStartStateCopy[matchStartState]?.detail}</p>
+                </div>
+              )}
+              {quickOnlineFlowActive && matchStartState === 'WAITING_USER_DECISION' && (
+                <div className="flex flex-wrap gap-2">
+                  {unifiedPlayFeatureFlags.hybridRematchReplacementV1 && (
+                    <button
+                      type="button"
+                      className="rounded-md border border-cyan-300 px-2 py-1 text-[11px] font-semibold text-cyan-100"
+                      onClick={handleStartWithAiFallback}
+                    >
+                      Start with AI now
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100"
+                    onClick={handleKeepWaitingQuickOnline}
+                  >
+                    Keep waiting
+                  </button>
+                </div>
+              )}
               {onlineSessionId && (
                 <div className="flex flex-wrap items-center gap-2">
                   {debugEnabled && <p>Online session: {onlineSessionId}</p>}
@@ -2450,6 +3381,11 @@ function App() {
               <div className="rounded-lg border border-emerald-500/40 bg-slate-950/30 p-3 text-xs text-emerald-50">
                 <p className="font-semibold text-emerald-200">Between Games</p>
                 <p className="mt-1">Choose <span className="font-semibold">Play Again</span> to start a rematch in this same match, or <span className="font-semibold">Leave Match</span> to return home.</p>
+                {unifiedPlayFeatureFlags.hybridRematchReplacementV1 && (
+                  <p className="mt-1 text-emerald-200/90">
+                    Rematch uses the Hybrid Slot Planner. Human-only seats must be connected before rematch starts.
+                  </p>
+                )}
                 <p className="mt-2 text-emerald-200">Seat readiness:</p>
                 <ul className="mt-1 list-disc space-y-1 pl-5">
                   {onlineSnapshot.playerSeats.map((seat) => (
