@@ -25,6 +25,7 @@ import leaveHandler from './sessions/leave.js'
 import rematchHandler from './sessions/rematch.js'
 import inviteCodeHandler from './sessions/invite-code.js'
 import joinByCodeHandler from './sessions/join-by-code.js'
+import startVsAiHandler from './sessions/start-vs-ai.js'
 import revokeInviteCodeHandler from './sessions/revoke-invite-code.js'
 import profileHandler from './profile.js'
 import profileVisibilityHandler from './profile/visibility.js'
@@ -439,6 +440,43 @@ describe('Phase 3 API lifecycle', () => {
     const snapshot = (getResult.payload as SnapshotPayload).snapshot
     expect(snapshot.sessionId).toBe(sessionId)
     expect(snapshot.playerSeats).toHaveLength(2)
+  })
+
+  it('starts an online match versus selected AI immediately', async () => {
+    const startRes = createMockRes()
+    await startVsAiHandler(
+      createMockReq({
+        method: 'POST',
+        body: {
+          aiSlug: 'void-raven',
+        },
+      }),
+      startRes,
+    )
+
+    const startResult = startRes.getResult()
+    expect(startResult.statusCode).toBe(200)
+
+    const sessionId = (startResult.payload as { sessionId: string }).sessionId
+    expect(sessionId).toBeTruthy()
+
+    const session = db.dice_sessions.find((entry) => entry.id === sessionId)
+    expect(session?.status).toBe('active')
+
+    const seats = db.dice_player_seats
+      .filter((seat) => seat.session_id === sessionId)
+      .sort((left, right) => Number(left.seat) - Number(right.seat))
+
+    expect(seats).toHaveLength(2)
+    expect(seats[0]?.is_ai).toBe(false)
+    expect(seats[1]?.is_ai).toBe(true)
+
+    const gameState = session?.game_state as {
+      started: boolean
+      players: Array<{ isAI: boolean }>
+    }
+    expect(gameState.started).toBe(true)
+    expect(gameState.players.map((player) => player.isAI)).toEqual([false, true])
   })
 
   it('rate limits queue requests when threshold is exceeded', async () => {
@@ -890,7 +928,7 @@ describe('Phase 3 API lifecycle', () => {
     expect(snapshot.gameState.turnResolutionHistory.length).toBeGreaterThan(0)
   })
 
-  it('creates invite code and allows join-by-code flow', async () => {
+  it('returns DIRECT_MATCH_DISABLED for invite and join-by-code endpoints', async () => {
     const queueRes = createMockRes()
     await queueHandler(createMockReq({ method: 'POST' }), queueRes)
     const sessionId = (queueRes.getResult().payload as QueueResponsePayload).sessionId
@@ -904,10 +942,8 @@ describe('Phase 3 API lifecycle', () => {
       inviteRes,
     )
 
-    expect(inviteRes.getResult().statusCode).toBe(200)
-    const invitePayload = inviteRes.getResult().payload as { code: string; expiresAt: string }
-    expect(invitePayload.code).toMatch(/^[a-z]+\d+$/)
-    expect(invitePayload.code.startsWith('roll')).toBe(true)
+    expect(inviteRes.getResult().statusCode).toBe(410)
+    expect((inviteRes.getResult().payload as { error?: string }).error).toBe('DIRECT_MATCH_DISABLED')
 
     verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u2', subject: 'auth0|u2', name: 'Sky Pilot' })
 
@@ -915,30 +951,23 @@ describe('Phase 3 API lifecycle', () => {
     await joinByCodeHandler(
       createMockReq({
         method: 'POST',
-        body: { code: invitePayload.code },
+        body: { code: 'roll1' },
       }),
       joinByCodeRes,
     )
 
-    expect(joinByCodeRes.getResult().statusCode).toBe(200)
-    expect((joinByCodeRes.getResult().payload as { joined?: boolean }).joined).toBe(true)
+    expect(joinByCodeRes.getResult().statusCode).toBe(410)
+    expect((joinByCodeRes.getResult().payload as { error?: string }).error).toBe('DIRECT_MATCH_DISABLED')
 
     const seats = db.dice_player_seats.filter((seat) => seat.session_id === sessionId)
-    expect(seats).toHaveLength(2)
-
-    const inviteRow = db.dice_match_invites.find((invite) => invite.code === invitePayload.code)
-    expect(inviteRow?.status).toBe('consumed')
+    expect(seats).toHaveLength(1)
   })
 
-  it('revokes active invite codes for the requesting host', async () => {
+  it('returns DIRECT_MATCH_DISABLED when revoke invite code is requested', async () => {
     const queueRes = createMockRes()
     await queueHandler(createMockReq({ method: 'POST' }), queueRes)
 
     const sessionId = (queueRes.getResult().payload as QueueResponsePayload).sessionId
-
-    const inviteRes = createMockRes()
-    await inviteCodeHandler(createMockReq({ method: 'POST', body: { sessionId } }), inviteRes)
-    expect(inviteRes.getResult().statusCode).toBe(200)
 
     const revokeRes = createMockRes()
     await revokeInviteCodeHandler(
@@ -946,11 +975,8 @@ describe('Phase 3 API lifecycle', () => {
       revokeRes,
     )
 
-    expect(revokeRes.getResult().statusCode).toBe(200)
-    expect((revokeRes.getResult().payload as { revokedCount?: number }).revokedCount).toBeGreaterThanOrEqual(1)
-
-    const activeInvites = db.dice_match_invites.filter((invite) => invite.session_id === sessionId)
-    expect(activeInvites.every((invite) => invite.status !== 'active')).toBe(true)
+    expect(revokeRes.getResult().statusCode).toBe(410)
+    expect((revokeRes.getResult().payload as { error?: string }).error).toBe('DIRECT_MATCH_DISABLED')
   })
 
   it('rejects blocked display names in profile updates', async () => {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Syn
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 import { TouchBackend } from 'react-dnd-touch-backend'
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useLocation } from 'react-router-dom'
 import { useAuth0 } from '@auth0/auth0-react'
 import { AppFooter } from './components/AppFooter'
 import { DicePool } from './components/DicePool'
@@ -19,7 +19,7 @@ import { OpponentsPage } from './pages/OpponentsPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { emptyAllocation, gameReducer, initialGameState } from './reducers/gameReducer'
 import type { Allocation, Difficulty, GameMode, GameState, TurnResolutionPlaybackStage } from './types'
-import { findAICharacterBySlug } from './data/aiCharacters'
+import { AI_CHARACTERS, findAICharacterBySlug, OPPONENT_THUMBNAIL_FALLBACK_SRC } from './data/aiCharacters'
 import { buildPostGameNarrative } from './utils/buildPostGameNarrative'
 import { preloadDiceAnimationAssets } from './utils/dieAssets'
 import {
@@ -38,7 +38,6 @@ import type { RealtimeEvent, SessionLifecycleAck, SessionSnapshot, TurnAck } fro
 
 const HELP_STORAGE_KEY = 'dice-odysseys-help-open'
 const HOME_MODE_STORAGE_KEY = 'dice-odysseys-home-mode'
-const PRESENCE_VISIBILITY_STORAGE_KEY = 'dice-odysseys-presence-visibility'
 const AI_THINK_DELAY_MS = 600
 const RESOLVE_STAGE_DELAY_MS = 240
 const REDUCED_MOTION_STAGE_DELAY_MS = 80
@@ -49,7 +48,8 @@ const MACGUFFIN_TOKEN_ICON = '/assets/ui/icon-macguffin-token.png'
 const HUMAN_WIN_CELEBRATION_MS = 4200
 const HUMAN_WIN_REDUCED_MOTION_MS = 2400
 const HUMAN_WIN_SCROLL_LEAD_MS = 260
-const QUICK_ONLINE_AUTOFILL_TIMEOUT_MS = 12000
+const ONLINE_PRIMARY_WAIT_TIMEOUT_MS = 60000
+const ONLINE_DECISION_WAIT_TIMEOUT_MS = 60000
 const SHOW_DEBUG_CONTROLS = /^(1|true)$/i.test(import.meta.env.VITE_SHOW_DEBUG_CONTROLS ?? '')
 
 const humanWinConfetti = [
@@ -72,7 +72,8 @@ const humanWinConfetti = [
 ]
 
 type ResolveAnimationVariant = 'rolling' | 'skip'
-type PresenceVisibility = 'discoverable' | 'friends-only' | 'private'
+type HomeStartMode = 'INSTANT' | 'HOTSEAT' | 'ONLINE'
+type OnlineWaitState = 'IDLE' | 'WAITING_PRIMARY' | 'WAITING_DECISION'
 type HybridSeatMode = 'auto' | 'human' | 'ai'
 type MatchStartState =
   | 'IDLE'
@@ -94,11 +95,6 @@ interface ActiveOpponent {
   fullName?: string
 }
 
-interface SocialUserEntry {
-  userId: string
-  displayName: string
-}
-
 interface PresenceDirectoryEntry {
   userId: string
   displayName: string
@@ -107,29 +103,7 @@ interface PresenceDirectoryEntry {
 }
 
 interface PresenceSnapshotPayload {
-  viewerVisibility?: PresenceVisibility
-  playersOnlineNow: number
-  playersSearchingNow: number
-  estimatedWaitSeconds?: number
-  region?: string
   availableNow?: PresenceDirectoryEntry[]
-  friendsOnline?: SocialUserEntry[]
-  joinNextGame?: Array<{
-    id: string
-    sessionId: string
-    fromDisplayName?: string
-    expiresAt?: string
-  }>
-}
-
-interface PartyInviteEntry {
-  id: string
-  sessionId: string
-  fromDisplayName?: string
-  toDisplayName?: string
-  status: string
-  expiresAt: string
-  createdAt?: string
 }
 
 interface ProfileDisplayNamePayload {
@@ -146,6 +120,15 @@ const withAvatarFallback = (event: SyntheticEvent<HTMLImageElement>) => {
   }
 
   image.src = PLAYER_AVATAR_FALLBACK_SRC
+}
+
+const withOpponentThumbnailFallback = (event: SyntheticEvent<HTMLImageElement>) => {
+  const image = event.currentTarget
+  if (image.src.endsWith(OPPONENT_THUMBNAIL_FALLBACK_SRC)) {
+    return
+  }
+
+  image.src = OPPONENT_THUMBNAIL_FALLBACK_SRC
 }
 
 const allDiceAllocated = (allocation: Allocation): boolean =>
@@ -240,16 +223,14 @@ function App() {
     isAuthenticated,
     isLoading: isAuthLoading,
     user,
-    loginWithRedirect,
     getAccessTokenSilently,
   } = useAuth0()
   const location = useLocation()
-  const navigate = useNavigate()
   const pathname = getNormalizedPathname(location.pathname)
-  const joinCodeFromQuery = useMemo(() => new URLSearchParams(location.search).get('code')?.trim() ?? '', [location.search])
   const opponentBioSlug = getOpponentBioSlug(pathname)
   const [state, dispatch] = useReducer(gameReducer, initialGameState)
   const [mode, setMode] = useState<GameMode>(() => getStoredHomeMode())
+  const [homeStartMode, setHomeStartMode] = useState<HomeStartMode>('INSTANT')
   const [difficulty, setDifficulty] = useState<Difficulty>('medium')
   const [humanName, setHumanName] = useState('Captain')
   const [aiCount, setAiCount] = useState(1)
@@ -273,34 +254,12 @@ function App() {
   const [onlineError, setOnlineError] = useState<string | null>(null)
   const [matchStartState, setMatchStartState] = useState<MatchStartState>('IDLE')
   const [quickOnlineFlowActive, setQuickOnlineFlowActive] = useState(false)
-  const [quickOnlineRetryKey, setQuickOnlineRetryKey] = useState(0)
-  const [presenceVisibility, setPresenceVisibility] = useState<PresenceVisibility>(() => {
-    if (typeof window === 'undefined') {
-      return 'discoverable'
-    }
-
-    const stored = window.localStorage.getItem(PRESENCE_VISIBILITY_STORAGE_KEY)
-    if (stored === 'discoverable' || stored === 'friends-only' || stored === 'private') {
-      return stored
-    }
-
-    return 'discoverable'
-  })
+  const [onlineWaitState, setOnlineWaitState] = useState<OnlineWaitState>('IDLE')
+  const [onlinePrimaryTimerExpiresAt, setOnlinePrimaryTimerExpiresAt] = useState<number | null>(null)
+  const [onlineDecisionTimerExpiresAt, setOnlineDecisionTimerExpiresAt] = useState<number | null>(null)
   const [onlineSubmitting, setOnlineSubmitting] = useState(false)
   const [onlineLifecycleSubmitting, setOnlineLifecycleSubmitting] = useState(false)
-  const [onlineInviteCode, setOnlineInviteCode] = useState<string | null>(null)
-  const [onlineInviteExpiry, setOnlineInviteExpiry] = useState<string | null>(null)
-  const [hybridSlotPlan, setHybridSlotPlan] = useState<HybridSeatMode[]>(['auto', 'auto', 'auto'])
-  const [onlineJoinCode, setOnlineJoinCode] = useState('')
-  const [joinLinkProcessing, setJoinLinkProcessing] = useState(false)
-  const [friendTargetDisplayName, setFriendTargetDisplayName] = useState('')
-  const [partyInviteTargetDisplayName, setPartyInviteTargetDisplayName] = useState('')
-  const [friends, setFriends] = useState<SocialUserEntry[]>([])
-  const [incomingFriendRequests, setIncomingFriendRequests] = useState<SocialUserEntry[]>([])
-  const [outgoingFriendRequests, setOutgoingFriendRequests] = useState<SocialUserEntry[]>([])
-  const [receivedPartyInvites, setReceivedPartyInvites] = useState<PartyInviteEntry[]>([])
-  const [sentPartyInvites, setSentPartyInvites] = useState<PartyInviteEntry[]>([])
-  const [socialLoading, setSocialLoading] = useState(false)
+  const [hybridSlotPlan] = useState<HybridSeatMode[]>(['auto', 'auto', 'auto'])
   const [profileDisplayName, setProfileDisplayName] = useState<string | null>(null)
   const [presenceSnapshot, setPresenceSnapshot] = useState<PresenceSnapshotPayload | null>(null)
 
@@ -332,7 +291,6 @@ function App() {
   const celebrationTimerRef = useRef<number | null>(null)
   const onlineRealtimeRef = useRef<SessionRealtimeController | null>(null)
   const onlineSessionGuardRef = useRef<string | null>(null)
-  const joinLinkHandledRef = useRef<string | null>(null)
   const matchStartStateRef = useRef<MatchStartState>('IDLE')
   const [helpOpen, setHelpOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
@@ -455,12 +413,8 @@ function App() {
   }, [mode])
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    window.localStorage.setItem(PRESENCE_VISIBILITY_STORAGE_KEY, presenceVisibility)
-  }, [presenceVisibility])
+    setMode('single')
+  }, [])
 
   useEffect(() => {
     setHotseatNames(buildDefaultHotseatNames(hotseatCount))
@@ -625,60 +579,6 @@ function App() {
       (onlineStatusMessage.includes('Opponent left the match.') ||
         onlineStatusMessage.includes('Match ended because a player left.')),
   )
-  const matchmakingRegionLabel = useMemo(() => {
-    if (presenceSnapshot?.region) {
-      return presenceSnapshot.region
-    }
-
-    if (typeof Intl === 'undefined') {
-      return 'Global'
-    }
-
-    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
-    if (!zone) {
-      return 'Global'
-    }
-
-    const pieces = zone.split('/')
-    return pieces[pieces.length - 1]?.replace(/_/g, ' ') ?? 'Global'
-  }, [presenceSnapshot?.region])
-
-  const playersOnlineNowCount = useMemo(() => {
-    if (typeof presenceSnapshot?.playersOnlineNow === 'number') {
-      return presenceSnapshot.playersOnlineNow
-    }
-
-    const connectedInSession = onlineSnapshot?.playerSeats.filter((seat) => seat.connected).length ?? 0
-    return Math.max(connectedInSession, friends.length)
-  }, [friends.length, onlineSnapshot, presenceSnapshot?.playersOnlineNow])
-
-  const playersSearchingNowCount = useMemo(() => {
-    if (typeof presenceSnapshot?.playersSearchingNow === 'number') {
-      return presenceSnapshot.playersSearchingNow
-    }
-
-    if (!quickOnlineFlowActive || onlineSessionId) {
-      return 0
-    }
-
-    return 1
-  }, [onlineSessionId, presenceSnapshot?.playersSearchingNow, quickOnlineFlowActive])
-
-  const estimatedWaitLabel = useMemo(() => {
-    if (typeof presenceSnapshot?.estimatedWaitSeconds === 'number') {
-      return `~${presenceSnapshot.estimatedWaitSeconds}s`
-    }
-
-    if (quickOnlineFlowActive && !onlineSessionId) {
-      return '~12s'
-    }
-
-    if (mode === 'multiplayer') {
-      return '<30s'
-    }
-
-    return '—'
-  }, [mode, onlineSessionId, presenceSnapshot?.estimatedWaitSeconds, quickOnlineFlowActive])
 
   const availableNowPlayers = useMemo(
     () => {
@@ -730,56 +630,6 @@ function App() {
     [multiplayerIdentity?.userId, onlineSessionId, onlineSnapshot, presenceSnapshot?.availableNow],
   )
 
-  const friendsOnlineEntries = useMemo(() => {
-    if (presenceSnapshot?.friendsOnline?.length) {
-      return presenceSnapshot.friendsOnline.slice(0, 3)
-    }
-
-    return friends.slice(0, 3)
-  }, [friends, presenceSnapshot?.friendsOnline])
-
-  const joinNextGameEntries = useMemo(() => {
-    if (presenceSnapshot?.joinNextGame?.length) {
-      return presenceSnapshot.joinNextGame.slice(0, 3)
-    }
-
-    return receivedPartyInvites
-      .filter((invite) => invite.status === 'pending')
-      .slice(0, 3)
-      .map((invite) => ({
-        id: invite.id,
-        sessionId: invite.sessionId,
-        fromDisplayName: invite.fromDisplayName,
-        expiresAt: invite.expiresAt,
-      }))
-  }, [presenceSnapshot?.joinNextGame, receivedPartyInvites])
-
-  const hybridSlotSummary = useMemo(() => {
-    const counts = hybridSlotPlan.reduce(
-      (accumulator, value) => {
-        if (value === 'human') {
-          accumulator.human += 1
-        } else if (value === 'ai') {
-          accumulator.ai += 1
-        } else {
-          accumulator.auto += 1
-        }
-
-        return accumulator
-      },
-      {
-        human: 0,
-        ai: 0,
-        auto: 0,
-      },
-    )
-
-    return `${counts.human} Human • ${counts.ai} AI • ${counts.auto} Auto`
-  }, [hybridSlotPlan])
-
-  const handleHybridSlotModeChange = useCallback((slotIndex: number, nextMode: HybridSeatMode) => {
-    setHybridSlotPlan((previous) => previous.map((value, index) => (index === slotIndex ? nextMode : value)))
-  }, [])
 
   useEffect(() => {
     return () => {
@@ -863,13 +713,12 @@ function App() {
     setOnlineSnapshot(null)
     setOnlineSessionId(null)
     setOnlineJoinSessionId('')
-    setOnlineJoinCode('')
     setOnlineSubmitting(false)
     setOnlineLifecycleSubmitting(false)
-    setOnlineInviteCode(null)
-    setOnlineInviteExpiry(null)
     setQuickOnlineFlowActive(false)
-    setQuickOnlineRetryKey(0)
+    setOnlineWaitState('IDLE')
+    setOnlinePrimaryTimerExpiresAt(null)
+    setOnlineDecisionTimerExpiresAt(null)
     setMatchStartStateTracked('IDLE')
   }, [setMatchStartStateTracked])
 
@@ -884,90 +733,12 @@ function App() {
     setOnlineSnapshot(null)
     setOnlineSessionId(null)
     setOnlineJoinSessionId('')
-    setOnlineJoinCode('')
     setOnlineSubmitting(false)
     setOnlineLifecycleSubmitting(false)
-    setOnlineInviteCode(null)
-    setOnlineInviteExpiry(null)
+    setOnlineWaitState('IDLE')
+    setOnlinePrimaryTimerExpiresAt(null)
+    setOnlineDecisionTimerExpiresAt(null)
   }, [])
-
-  const handleStartOnlineMatch = useCallback(async (entryPoint: 'FAST_ONLINE' | 'MANUAL_MULTIPLAYER' = 'MANUAL_MULTIPLAYER') => {
-    if (entryPoint === 'MANUAL_MULTIPLAYER') {
-      trackUnifiedPlayEvent('play_start_clicked', {
-        entryPoint,
-      })
-    }
-
-    if (!multiplayerEligibility.eligible) {
-      setOnlineError('Login is required before starting an online match.')
-      setMatchStartStateTracked('ERROR', { reason: 'NOT_ELIGIBLE', entryPoint })
-      trackUnifiedPlayEvent('match_start_error', {
-        entryPoint,
-        reason: 'NOT_ELIGIBLE',
-      })
-      return
-    }
-
-    try {
-      setOnlineError(null)
-      setOnlineStatusMessage('Finding match...')
-      setMatchStartStateTracked('SEARCHING_PLAYERS', { entryPoint })
-
-      const token = await getApiAccessToken()
-      const response = await fetch('/api/matchmaking/queue', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
-
-      if (!response.ok) {
-        throw new Error(await buildApiErrorMessage(response, 'Queue failed'))
-      }
-
-      const body = (await response.json()) as { sessionId: string }
-      setOnlineSessionId(body.sessionId)
-  setMatchStartStateTracked('MATCH_FOUND', { entryPoint, sessionId: body.sessionId })
-      await connectOnlineSession(body.sessionId)
-  setMatchStartStateTracked('SEAT_UPDATE', { entryPoint, sessionId: body.sessionId })
-
-      const inviteToken = await getApiAccessToken()
-      const inviteResponse = await fetch('/api/sessions/invite-code', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${inviteToken}`,
-        },
-        body: JSON.stringify({
-          sessionId: body.sessionId,
-        }),
-      })
-
-      if (inviteResponse.ok) {
-        const inviteBody = (await inviteResponse.json()) as {
-          code: string
-          expiresAt?: string
-        }
-        setOnlineInviteCode(inviteBody.code)
-        setOnlineInviteExpiry(inviteBody.expiresAt ?? null)
-        setOnlineStatusMessage(`Invite code ready: ${inviteBody.code}`)
-      }
-    } catch (error) {
-      setOnlineError(error instanceof Error ? error.message : 'Failed to start online match.')
-      setOnlineStatusMessage(null)
-      setMatchStartStateTracked('ERROR', { entryPoint })
-      trackUnifiedPlayEvent('match_start_error', {
-        entryPoint,
-        reason: error instanceof Error ? error.message : 'UNKNOWN_ERROR',
-      })
-    }
-  }, [
-    connectOnlineSession,
-    getApiAccessToken,
-    multiplayerEligibility.eligible,
-    setMatchStartStateTracked,
-    trackUnifiedPlayEvent,
-  ])
 
   const handleJoinOnlineMatch = useCallback(async () => {
     if (!multiplayerEligibility.eligible) {
@@ -1009,473 +780,43 @@ function App() {
     }
   }, [connectOnlineSession, getApiAccessToken, multiplayerEligibility.eligible, onlineJoinSessionId])
 
-  const joinOnlineMatchByCode = useCallback(
-    async (codeInput: string, options?: { navigateHome?: boolean }) => {
-      if (!multiplayerEligibility.eligible) {
-        setOnlineError('Login is required before joining an online match.')
-        return false
-      }
-
-      const code = codeInput.trim().toLowerCase()
-      if (!code) {
-        setOnlineError('Enter an invite code to join.')
-        return false
-      }
-
-      try {
-        setOnlineError(null)
-        setOnlineStatusMessage(`Joining with invite code ${code}...`)
-
-        const token = await getApiAccessToken()
-        const response = await fetch('/api/sessions/join-by-code', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            code,
-          }),
-        })
-
-        if (!response.ok) {
-          throw new Error(await buildApiErrorMessage(response, 'Join by invite code failed'))
-        }
-
-        const body = (await response.json()) as { sessionId: string }
-        setOnlineSessionId(body.sessionId)
-        await connectOnlineSession(body.sessionId)
-
-        if (options?.navigateHome) {
-          navigate('/', { replace: true })
-        }
-
-        return true
-      } catch (error) {
-        setOnlineError(error instanceof Error ? error.message : 'Failed to join by invite code.')
-        setOnlineStatusMessage(null)
-        return false
-      }
-    },
-    [connectOnlineSession, getApiAccessToken, multiplayerEligibility.eligible, navigate],
-  )
-
-  const handleCreateInviteCode = useCallback(async () => {
+  const refreshPresenceData = useCallback(async () => {
     if (!multiplayerEligibility.eligible) {
-      setOnlineError('Login is required before creating invite codes.')
-      return
-    }
-
-    if (!onlineSessionId) {
-      setOnlineError('Start or join an online session before creating invite codes.')
       return
     }
 
     try {
-      setOnlineError(null)
-      setOnlineStatusMessage('Creating invite code...')
-
       const token = await getApiAccessToken()
-      const response = await fetch('/api/sessions/invite-code', {
-        method: 'POST',
+
+      const presenceResponse = await fetch('/api/matchmaking/presence', {
+        method: 'GET',
         headers: {
-          'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          sessionId: onlineSessionId,
-        }),
       })
-
-      if (!response.ok) {
-        throw new Error(await buildApiErrorMessage(response, 'Invite code request failed'))
-      }
-
-      const body = (await response.json()) as {
-        code: string
-        expiresAt?: string
-      }
-
-      setOnlineInviteCode(body.code)
-      setOnlineInviteExpiry(body.expiresAt ?? null)
-      setOnlineStatusMessage(`Invite code ready: ${body.code}`)
-    } catch (error) {
-      setOnlineError(error instanceof Error ? error.message : 'Failed to create invite code.')
-      setOnlineStatusMessage(null)
-    }
-  }, [getApiAccessToken, multiplayerEligibility.eligible, onlineSessionId])
-
-  const handleCopyInviteLink = useCallback(async () => {
-    if (!onlineInviteCode || typeof navigator === 'undefined' || !navigator.clipboard) {
-      setOnlineError('Create an invite code before copying an invite link.')
-      return
-    }
-
-    const inviteUrl = `${window.location.origin}/join?code=${encodeURIComponent(onlineInviteCode)}`
-
-    try {
-      await navigator.clipboard.writeText(inviteUrl)
-      setOnlineError(null)
-      setOnlineStatusMessage(`Invite link copied for code ${onlineInviteCode}.`)
-    } catch {
-      setOnlineError('Failed to copy invite link.')
-    }
-  }, [onlineInviteCode])
-
-  const refreshSocialData = useCallback(async () => {
-    if (!multiplayerEligibility.eligible) {
-      return
-    }
-
-    try {
-      setSocialLoading(true)
-      const token = await getApiAccessToken()
-
-      const [friendsResponse, invitesResponse, presenceResponse] = await Promise.all([
-        fetch('/api/friends/list', {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-        fetch('/api/sessions/party-invites', {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-        fetch('/api/matchmaking/presence', {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-      ])
-
-      if (!friendsResponse.ok) {
-        throw new Error(await buildApiErrorMessage(friendsResponse, 'Failed to load friends'))
-      }
-
-      if (!invitesResponse.ok) {
-        throw new Error(await buildApiErrorMessage(invitesResponse, 'Failed to load party invites'))
-      }
-
-      const friendsBody = (await friendsResponse.json()) as {
-        friends?: SocialUserEntry[]
-        incomingRequests?: SocialUserEntry[]
-        outgoingRequests?: SocialUserEntry[]
-      }
-
-      const invitesBody = (await invitesResponse.json()) as {
-        received?: PartyInviteEntry[]
-        sent?: PartyInviteEntry[]
-      }
 
       if (presenceResponse.ok) {
         const presenceBody = (await presenceResponse.json()) as {
           presence?: PresenceSnapshotPayload
         }
         setPresenceSnapshot(presenceBody.presence ?? null)
-        if (presenceBody.presence?.viewerVisibility) {
-          setPresenceVisibility(presenceBody.presence.viewerVisibility)
-        }
       } else {
         setPresenceSnapshot(null)
       }
-
-      setFriends(friendsBody.friends ?? [])
-      setIncomingFriendRequests(friendsBody.incomingRequests ?? [])
-      setOutgoingFriendRequests(friendsBody.outgoingRequests ?? [])
-      setReceivedPartyInvites(invitesBody.received ?? [])
-      setSentPartyInvites(invitesBody.sent ?? [])
     } catch (error) {
-      setOnlineError(error instanceof Error ? error.message : 'Failed to refresh social data.')
-    } finally {
-      setSocialLoading(false)
+      setOnlineError(error instanceof Error ? error.message : 'Failed to refresh online presence.')
     }
   }, [getApiAccessToken, multiplayerEligibility.eligible])
 
-  const handleModerationAction = useCallback(
-    async (targetDisplayName: string, action: 'BLOCK' | 'MUTE' | 'REPORT') => {
-      if (!multiplayerEligibility.eligible) {
-        setOnlineError('Login is required before moderation actions.')
-        return
-      }
-
-      try {
-        setOnlineError(null)
-        const token = await getApiAccessToken()
-        const response = await fetch('/api/friends/moderate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            targetDisplayName,
-            action,
-          }),
-        })
-
-        if (!response.ok) {
-          throw new Error(await buildApiErrorMessage(response, 'Moderation action failed'))
-        }
-
-        setOnlineStatusMessage(`${action} requested for ${targetDisplayName}.`)
-        await refreshSocialData()
-      } catch (error) {
-        setOnlineError(error instanceof Error ? error.message : 'Moderation action failed.')
-      }
-    },
-    [getApiAccessToken, multiplayerEligibility.eligible, refreshSocialData],
-  )
-
-  const handlePresenceVisibilityChange = useCallback(
-    async (visibility: PresenceVisibility) => {
-      if (!multiplayerEligibility.eligible) {
-        setPresenceVisibility(visibility)
-        return
-      }
-
-      try {
-        const token = await getApiAccessToken()
-        const response = await fetch('/api/profile/visibility', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ visibility }),
-        })
-
-        if (!response.ok) {
-          throw new Error(await buildApiErrorMessage(response, 'Failed to update visibility'))
-        }
-
-        setPresenceVisibility(visibility)
-        setOnlineError(null)
-        setOnlineStatusMessage(`Presence visibility set to ${visibility}.`)
-        await refreshSocialData()
-      } catch (error) {
-        setOnlineError(error instanceof Error ? error.message : 'Failed to update visibility.')
-      }
-    },
-    [getApiAccessToken, multiplayerEligibility.eligible, refreshSocialData],
-  )
-
-  const handleSendFriendRequest = useCallback(async () => {
-    if (!multiplayerEligibility.eligible) {
-      setOnlineError('Login is required before managing friends.')
-      return
-    }
-
-    const targetDisplayName = friendTargetDisplayName.trim()
-    if (!targetDisplayName) {
-      setOnlineError('Enter a display name to send a friend request.')
-      return
-    }
-
-    try {
-      setOnlineError(null)
-      const token = await getApiAccessToken()
-      const response = await fetch('/api/friends/request', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          targetDisplayName,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(await buildApiErrorMessage(response, 'Friend request failed'))
-      }
-
-      setFriendTargetDisplayName('')
-      setOnlineStatusMessage(`Friend request sent to ${targetDisplayName}.`)
-      await refreshSocialData()
-    } catch (error) {
-      setOnlineError(error instanceof Error ? error.message : 'Failed to send friend request.')
-    }
-  }, [friendTargetDisplayName, getApiAccessToken, multiplayerEligibility.eligible, refreshSocialData])
-
-  const handleRespondFriendRequest = useCallback(
-    async (requesterUserId: string, requesterDisplayName: string, action: 'ACCEPT' | 'DECLINE' | 'BLOCK') => {
-      if (!multiplayerEligibility.eligible) {
-        setOnlineError('Login is required before managing friends.')
-        return
-      }
-
-      try {
-        setOnlineError(null)
-        const token = await getApiAccessToken()
-        const response = await fetch('/api/friends/respond', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            requesterUserId,
-            action,
-          }),
-        })
-
-        if (!response.ok) {
-          throw new Error(await buildApiErrorMessage(response, 'Friend response failed'))
-        }
-
-        setOnlineStatusMessage(
-          action === 'ACCEPT'
-            ? `Friend request from ${requesterDisplayName} accepted.`
-            : action === 'DECLINE'
-              ? `Friend request from ${requesterDisplayName} declined.`
-              : `${requesterDisplayName} blocked.`,
-        )
-
-        await refreshSocialData()
-      } catch (error) {
-        setOnlineError(error instanceof Error ? error.message : 'Failed to respond to friend request.')
-      }
-    },
-    [getApiAccessToken, multiplayerEligibility.eligible, refreshSocialData],
-  )
-
-  const handleSendPartyInvite = useCallback(async () => {
-    if (!multiplayerEligibility.eligible) {
-      setOnlineError('Login is required before sending party invites.')
-      return
-    }
-
-    if (!onlineSessionId) {
-      setOnlineError('Start or join an online match before sending party invites.')
-      return
-    }
-
-    const toDisplayName = partyInviteTargetDisplayName.trim()
-    if (!toDisplayName) {
-      setOnlineError('Select a friend to invite.')
-      return
-    }
-
-    try {
-      setOnlineError(null)
-      const token = await getApiAccessToken()
-      const response = await fetch('/api/sessions/party-invite', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          sessionId: onlineSessionId,
-          toDisplayName,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(await buildApiErrorMessage(response, 'Party invite failed'))
-      }
-
-      setPartyInviteTargetDisplayName('')
-      setOnlineStatusMessage(`Party invite sent to ${toDisplayName}.`)
-      await refreshSocialData()
-    } catch (error) {
-      setOnlineError(error instanceof Error ? error.message : 'Failed to send party invite.')
-    }
-  }, [getApiAccessToken, multiplayerEligibility.eligible, onlineSessionId, partyInviteTargetDisplayName, refreshSocialData])
-
-  const handleRespondPartyInvite = useCallback(
-    async (inviteId: string, action: 'ACCEPT' | 'DECLINE') => {
-      if (!multiplayerEligibility.eligible) {
-        setOnlineError('Login is required before responding to party invites.')
-        return
-      }
-
-      try {
-        setOnlineError(null)
-        const token = await getApiAccessToken()
-        const response = await fetch('/api/sessions/party-invite/respond', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            inviteId,
-            action,
-          }),
-        })
-
-        if (!response.ok) {
-          throw new Error(await buildApiErrorMessage(response, 'Party invite response failed'))
-        }
-
-        const body = (await response.json()) as { sessionId?: string }
-
-        if (action === 'ACCEPT' && body.sessionId) {
-          setOnlineSessionId(body.sessionId)
-          await connectOnlineSession(body.sessionId)
-          setOnlineStatusMessage('Party invite accepted. Connected to match.')
-        } else {
-          setOnlineStatusMessage('Party invite declined.')
-        }
-
-        await refreshSocialData()
-      } catch (error) {
-        setOnlineError(error instanceof Error ? error.message : 'Failed to respond to party invite.')
-      }
-    },
-    [connectOnlineSession, getApiAccessToken, multiplayerEligibility.eligible, refreshSocialData],
-  )
-
-  useEffect(() => {
-    if (pathname !== '/join') {
-      return
-    }
-
-    const code = joinCodeFromQuery.trim().toLowerCase()
-
-    if (!code) {
-      setOnlineError('Invite link is missing code parameter.')
-      return
-    }
-
-    if (!multiplayerEligibility.eligible || joinLinkProcessing) {
-      return
-    }
-
-    if (joinLinkHandledRef.current === code) {
-      return
-    }
-
-    joinLinkHandledRef.current = code
-
-    void (async () => {
-      setJoinLinkProcessing(true)
-      try {
-        await joinOnlineMatchByCode(code, { navigateHome: true })
-      } finally {
-        setJoinLinkProcessing(false)
-      }
-    })()
-  }, [joinCodeFromQuery, joinLinkProcessing, joinOnlineMatchByCode, multiplayerEligibility.eligible, pathname])
 
   useEffect(() => {
     if (!multiplayerEligibility.eligible) {
-      setFriends([])
-      setIncomingFriendRequests([])
-      setOutgoingFriendRequests([])
-      setReceivedPartyInvites([])
-      setSentPartyInvites([])
       setPresenceSnapshot(null)
       return
     }
 
-    void refreshSocialData()
-  }, [multiplayerEligibility.eligible, refreshSocialData])
+    void refreshPresenceData()
+  }, [multiplayerEligibility.eligible, refreshPresenceData])
 
   const refreshOnlineSnapshot = useCallback(async () => {
     if (!onlineRealtimeRef.current || !onlineSessionId) {
@@ -1868,56 +1209,130 @@ function App() {
     trackUnifiedPlayEvent,
   ])
 
-  const handleStartQuickOnline = useCallback(async () => {
-    trackUnifiedPlayEvent('play_start_clicked', {
-      entryPoint: 'FAST_ONLINE',
-    })
+  const handleStartOnlineAiMatch = useCallback(
+    async (aiSlug: string) => {
+      if (!multiplayerEligibility.eligible) {
+        setOnlineError('Login is required before starting an online match.')
+        return
+      }
 
-    setQuickOnlineFlowActive(true)
-    setQuickOnlineRetryKey((value) => value + 1)
-    setMode('multiplayer')
-    setOnlineError(null)
-    setOnlineStatusMessage('Finding a quick online match...')
-    setMatchStartStateTracked('LOCKING_PLAN', { entryPoint: 'FAST_ONLINE' })
-    await handleStartOnlineMatch('FAST_ONLINE')
-  }, [handleStartOnlineMatch, setMatchStartStateTracked, trackUnifiedPlayEvent])
+      const aiCharacter = findAICharacterBySlug(aiSlug)
+      const aiLabel = aiCharacter?.shortName ?? 'AI Rival'
 
-  const handlePlayWithFriendsEntry = useCallback(() => {
-    trackUnifiedPlayEvent('play_start_clicked', {
-      entryPoint: 'PLAY_WITH_FRIENDS',
-    })
+      trackUnifiedPlayEvent('online_target_selected', {
+        targetType: 'ai',
+        targetId: aiSlug,
+      })
 
-    setQuickOnlineFlowActive(false)
-    setQuickOnlineRetryKey(0)
-    setMode('multiplayer')
-    setOnlineError(null)
-    setOnlineStatusMessage('Use invite code or social panels below to play with friends.')
-    setMatchStartStateTracked('IDLE')
-  }, [setMatchStartStateTracked, trackUnifiedPlayEvent])
+      setMode('multiplayer')
+      setQuickOnlineFlowActive(false)
+      setOnlineWaitState('IDLE')
+      setOnlinePrimaryTimerExpiresAt(null)
+      setOnlineDecisionTimerExpiresAt(null)
+      setOnlineError(null)
+      setOnlineStatusMessage(`Starting online match versus ${aiLabel}...`)
+      setMatchStartStateTracked('STARTING', {
+        entryPoint: 'FAST_ONLINE',
+        targetType: 'ai',
+      })
 
-  const handleCustomSetupEntry = useCallback(() => {
-    trackUnifiedPlayEvent('play_start_clicked', {
-      entryPoint: 'CUSTOM_SETUP',
-    })
+      try {
+        const token = await getApiAccessToken()
+        const response = await fetch('/api/sessions/start-vs-ai', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            aiSlug,
+          }),
+        })
 
-    setQuickOnlineFlowActive(false)
-    setQuickOnlineRetryKey(0)
-    setOnlineError(null)
-    setOnlineStatusMessage('Customize your match setup using the options below.')
-    setMatchStartStateTracked('IDLE')
-  }, [setMatchStartStateTracked, trackUnifiedPlayEvent])
+        if (!response.ok) {
+          throw new Error(await buildApiErrorMessage(response, 'Start versus AI failed'))
+        }
+
+        const body = (await response.json()) as { sessionId: string }
+        setOnlineSessionId(body.sessionId)
+        await connectOnlineSession(body.sessionId)
+        setMatchStartStateTracked('ENTERED_MATCH', {
+          entryPoint: 'FAST_ONLINE',
+          targetType: 'ai',
+          sessionId: body.sessionId,
+        })
+        trackUnifiedPlayEvent('online_match_started', {
+          targetType: 'ai',
+          sessionId: body.sessionId,
+          aiSlug,
+        })
+      } catch (error) {
+        setOnlineError(error instanceof Error ? error.message : 'Failed to start online AI match.')
+        setOnlineStatusMessage(null)
+        setMatchStartStateTracked('ERROR', {
+          entryPoint: 'FAST_ONLINE',
+          targetType: 'ai',
+        })
+      }
+    },
+    [
+      connectOnlineSession,
+      getApiAccessToken,
+      multiplayerEligibility.eligible,
+      setMatchStartStateTracked,
+      trackUnifiedPlayEvent,
+    ],
+  )
+
+  const handleSelectHomeStartMode = useCallback(
+    (nextMode: HomeStartMode) => {
+      if (nextMode === 'ONLINE' && !multiplayerEligibility.eligible) {
+        setOnlineError('Log in on Profile to use Online Match.')
+        return
+      }
+
+      setHomeStartMode(nextMode)
+      setOnlineError(null)
+
+      if (nextMode === 'INSTANT') {
+        setMode('single')
+        setQuickOnlineFlowActive(false)
+        setMatchStartStateTracked('IDLE')
+        setOnlineStatusMessage('Configure your AI adventure, then click Start Game.')
+        return
+      }
+
+      if (nextMode === 'HOTSEAT') {
+        setMode('hotseat')
+        setQuickOnlineFlowActive(false)
+        setMatchStartStateTracked('IDLE')
+        setOnlineStatusMessage('Set local players, then click Start Game.')
+        return
+      }
+
+      setMode('multiplayer')
+      setQuickOnlineFlowActive(false)
+      setMatchStartStateTracked('IDLE')
+      setOnlineStatusMessage('Choose from waiting humans or AI opponents, then start matchmaking.')
+    },
+    [multiplayerEligibility.eligible, setMatchStartStateTracked],
+  )
 
   const handleKeepWaitingQuickOnline = useCallback(() => {
+    trackUnifiedPlayEvent('online_wait_keep_waiting_clicked')
     setOnlineError(null)
-    setOnlineStatusMessage('Continuing to search for players...')
+    setOnlineStatusMessage('Continuing to wait for a player...')
+    setOnlineWaitState('WAITING_PRIMARY')
+    setOnlinePrimaryTimerExpiresAt(Date.now() + ONLINE_PRIMARY_WAIT_TIMEOUT_MS)
+    setOnlineDecisionTimerExpiresAt(null)
     setMatchStartStateTracked('SEARCHING_PLAYERS', {
       entryPoint: 'FAST_ONLINE',
       reason: 'KEEP_WAITING',
     })
-    setQuickOnlineRetryKey((value) => value + 1)
-  }, [setMatchStartStateTracked])
+  }, [setMatchStartStateTracked, trackUnifiedPlayEvent])
 
   const handleStartWithAiFallback = useCallback(() => {
+    trackUnifiedPlayEvent('online_wait_instant_adventure_clicked')
     trackUnifiedPlayEvent('auto_fill_triggered', {
       reason: 'user_choice',
       entryPoint: 'FAST_ONLINE',
@@ -1928,6 +1343,9 @@ function App() {
       entryPoint: 'FAST_ONLINE',
       reason: 'USER_CHOICE',
     })
+    setOnlineWaitState('IDLE')
+    setOnlinePrimaryTimerExpiresAt(null)
+    setOnlineDecisionTimerExpiresAt(null)
     setOnlineStatusMessage('No full lobby yet—starting instantly with AI.')
 
     window.setTimeout(() => {
@@ -1938,53 +1356,157 @@ function App() {
     }, 220)
   }, [handleStartInstantAdventure, setMatchStartStateTracked, trackUnifiedPlayEvent])
 
+  const handleSelectWaitingHuman = useCallback(
+    async (seat: PresenceDirectoryEntry) => {
+      if (!seat.sessionId) {
+        setOnlineError(`Could not join ${seat.displayName}: session unavailable.`)
+        return
+      }
+
+      setOnlineJoinSessionId(seat.sessionId)
+      trackUnifiedPlayEvent('online_target_selected', {
+        targetType: 'human',
+        targetId: seat.userId,
+        sessionId: seat.sessionId,
+      })
+      setOnlineWaitState('IDLE')
+      setOnlinePrimaryTimerExpiresAt(null)
+      setOnlineDecisionTimerExpiresAt(null)
+      setOnlineStatusMessage(`Joining ${seat.displayName}...`)
+
+      if (!multiplayerEligibility.eligible) {
+        setOnlineError('Login is required before joining an online match.')
+        return
+      }
+
+      try {
+        setOnlineError(null)
+        const token = await getApiAccessToken()
+        const response = await fetch('/api/sessions/join', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            sessionId: seat.sessionId,
+          }),
+        })
+
+        if (!response.ok) {
+          throw new Error(await buildApiErrorMessage(response, 'Join failed'))
+        }
+
+        setOnlineSessionId(seat.sessionId)
+        await connectOnlineSession(seat.sessionId)
+        setMatchStartStateTracked('ENTERED_MATCH', {
+          entryPoint: 'FAST_ONLINE',
+          targetType: 'human',
+          sessionId: seat.sessionId,
+        })
+        trackUnifiedPlayEvent('online_match_started', {
+          targetType: 'human',
+          sessionId: seat.sessionId,
+        })
+      } catch (error) {
+        setOnlineError(error instanceof Error ? error.message : 'Failed to join selected player.')
+        setOnlineStatusMessage(null)
+      }
+    },
+    [connectOnlineSession, getApiAccessToken, multiplayerEligibility.eligible, setMatchStartStateTracked, trackUnifiedPlayEvent],
+  )
+
   useEffect(() => {
-    if (!quickOnlineFlowActive) {
+    if (homeStartMode !== 'ONLINE' || !multiplayerEligibility.eligible) {
+      if (onlineWaitState !== 'IDLE' || onlinePrimaryTimerExpiresAt !== null || onlineDecisionTimerExpiresAt !== null) {
+        setOnlineWaitState('IDLE')
+        setOnlinePrimaryTimerExpiresAt(null)
+        setOnlineDecisionTimerExpiresAt(null)
+      }
       return
     }
 
-    if (onlineSnapshot?.gameState.started) {
+    if (onlineSessionId || onlineSnapshot?.gameState.started) {
+      if (onlineWaitState !== 'IDLE' || onlinePrimaryTimerExpiresAt !== null || onlineDecisionTimerExpiresAt !== null) {
+        setOnlineWaitState('IDLE')
+        setOnlinePrimaryTimerExpiresAt(null)
+        setOnlineDecisionTimerExpiresAt(null)
+      }
       return
     }
 
-    if (
-      matchStartState !== 'LOCKING_PLAN' &&
-      matchStartState !== 'SEARCHING_PLAYERS' &&
-      matchStartState !== 'SEAT_UPDATE'
-    ) {
+    if (onlineWaitState !== 'IDLE') {
       return
     }
 
-    const timer = window.setTimeout(() => {
-      const connectedHumanSeats = onlineSnapshot?.playerSeats.filter((seat) => !seat.isAI && seat.connected).length ?? 1
-      const openSeatCount = Math.max(1, 2 - connectedHumanSeats)
-
-      trackUnifiedPlayEvent('auto_fill_triggered', {
-        reason: 'timeout',
-        entryPoint: 'FAST_ONLINE',
-        openSeatCount,
-        sessionId: onlineSessionId ?? undefined,
-      })
-
-      setMatchStartStateTracked('WAITING_USER_DECISION', {
-        entryPoint: 'FAST_ONLINE',
-        timeoutMs: QUICK_ONLINE_AUTOFILL_TIMEOUT_MS,
-        sessionId: onlineSessionId ?? undefined,
-      })
-
-      setOnlineStatusMessage('One seat still needs a player. Start with AI now or keep waiting.')
-    }, QUICK_ONLINE_AUTOFILL_TIMEOUT_MS)
-
-    return () => window.clearTimeout(timer)
+    const expiresAt = Date.now() + ONLINE_PRIMARY_WAIT_TIMEOUT_MS
+    setOnlineWaitState('WAITING_PRIMARY')
+    setOnlinePrimaryTimerExpiresAt(expiresAt)
+    setOnlineDecisionTimerExpiresAt(null)
+    setOnlineStatusMessage('Online Match is active. Pick a human or AI, or keep waiting up to 60 seconds.')
+    setMatchStartStateTracked('SEARCHING_PLAYERS', {
+      entryPoint: 'FAST_ONLINE',
+      waitPhase: 'primary',
+    })
+    trackUnifiedPlayEvent('online_wait_timer_started', {
+      phase: 'primary',
+      timeoutMs: ONLINE_PRIMARY_WAIT_TIMEOUT_MS,
+    })
   }, [
-    matchStartState,
+    homeStartMode,
+    multiplayerEligibility.eligible,
+    onlineDecisionTimerExpiresAt,
+    onlinePrimaryTimerExpiresAt,
     onlineSessionId,
-    onlineSnapshot,
-    quickOnlineFlowActive,
-    quickOnlineRetryKey,
+    onlineSnapshot?.gameState.started,
+    onlineWaitState,
     setMatchStartStateTracked,
     trackUnifiedPlayEvent,
   ])
+
+  useEffect(() => {
+    if (onlineWaitState !== 'WAITING_PRIMARY' || onlinePrimaryTimerExpiresAt === null) {
+      return
+    }
+
+    const remainingMs = Math.max(0, onlinePrimaryTimerExpiresAt - Date.now())
+    const timer = window.setTimeout(() => {
+      trackUnifiedPlayEvent('online_wait_timer_expired', {
+        phase: 'primary',
+      })
+      const decisionExpiresAt = Date.now() + ONLINE_DECISION_WAIT_TIMEOUT_MS
+      setOnlineWaitState('WAITING_DECISION')
+      setOnlineDecisionTimerExpiresAt(decisionExpiresAt)
+      setOnlineStatusMessage('No selection yet. Keep waiting or return to Instant Adventure within 60 seconds.')
+      setMatchStartStateTracked('WAITING_USER_DECISION', {
+        entryPoint: 'FAST_ONLINE',
+        timeoutMs: ONLINE_DECISION_WAIT_TIMEOUT_MS,
+      })
+      trackUnifiedPlayEvent('online_wait_timer_started', {
+        phase: 'decision',
+        timeoutMs: ONLINE_DECISION_WAIT_TIMEOUT_MS,
+      })
+    }, remainingMs)
+
+    return () => window.clearTimeout(timer)
+  }, [onlinePrimaryTimerExpiresAt, onlineWaitState, setMatchStartStateTracked, trackUnifiedPlayEvent])
+
+  useEffect(() => {
+    if (onlineWaitState !== 'WAITING_DECISION' || onlineDecisionTimerExpiresAt === null) {
+      return
+    }
+
+    const remainingMs = Math.max(0, onlineDecisionTimerExpiresAt - Date.now())
+    const timer = window.setTimeout(() => {
+      trackUnifiedPlayEvent('online_wait_timer_expired', {
+        phase: 'decision',
+      })
+      setOnlineStatusMessage('No selection made in time. Returning to Instant Adventure.')
+      handleSelectHomeStartMode('INSTANT')
+    }, remainingMs)
+
+    return () => window.clearTimeout(timer)
+  }, [handleSelectHomeStartMode, onlineDecisionTimerExpiresAt, onlineWaitState, trackUnifiedPlayEvent])
 
   useEffect(() => {
     if (!quickOnlineFlowActive || !onlineSessionId || !onlineSnapshot) {
@@ -2283,11 +1805,8 @@ function App() {
     setOnlineSnapshot(null)
     setOnlineSessionId(null)
     setOnlineJoinSessionId('')
-    setOnlineJoinCode('')
     setOnlineSubmitting(false)
     setOnlineLifecycleSubmitting(false)
-    setOnlineInviteCode(null)
-    setOnlineInviteExpiry(null)
     setQuickOnlineFlowActive(false)
     setMatchStartStateTracked('IDLE')
 
@@ -2355,68 +1874,6 @@ function App() {
     anchor.download = `dice-odysseys-debug-${Date.now()}.json`
     anchor.click()
     URL.revokeObjectURL(url)
-  }
-
-  if (pathname === '/join') {
-    const inviteCode = joinCodeFromQuery.trim().toLowerCase()
-
-    return (
-      <div className="flex min-h-screen flex-col">
-        <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center p-6">
-          <section className="rounded-2xl border border-slate-700 bg-slate-950/80 p-6">
-            <h1 className="text-2xl font-bold text-cyan-200">Join Match</h1>
-            <p className="mt-2 text-sm text-slate-300">Use your invite link to join an online match.</p>
-
-            <div className="mt-4 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-sm text-slate-200">
-              <p>
-                Invite code: <span className="font-semibold text-cyan-200">{inviteCode || 'Missing code'}</span>
-              </p>
-            </div>
-
-            {!multiplayerEligibility.eligible ? (
-              <div className="mt-4 space-y-3">
-                <p className="text-sm text-slate-300">Log in to continue with this invite.</p>
-                <button
-                  type="button"
-                  className="rounded-md border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-100"
-                  onClick={() => {
-                    void loginWithRedirect({
-                      authorizationParams: {
-                        redirect_uri: window.location.href,
-                      },
-                    })
-                  }}
-                  disabled={isAuthLoading}
-                >
-                  {isAuthLoading ? 'Checking auth…' : 'Log in to Join'}
-                </button>
-              </div>
-            ) : (
-              <div className="mt-4 space-y-3">
-                <button
-                  type="button"
-                  className="rounded-md bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50"
-                  onClick={() => {
-                    void joinOnlineMatchByCode(inviteCode, { navigateHome: true })
-                  }}
-                  disabled={!inviteCode || joinLinkProcessing}
-                >
-                  {joinLinkProcessing ? 'Joining…' : 'Join Match'}
-                </button>
-              </div>
-            )}
-
-            {(onlineStatusMessage || onlineError) && (
-              <div className="mt-4 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-xs">
-                {onlineStatusMessage ? <p className="text-cyan-200">{onlineStatusMessage}</p> : null}
-                {onlineError ? <p className="mt-1 text-rose-300">{onlineError}</p> : null}
-              </div>
-            )}
-          </section>
-        </main>
-        <AppFooter />
-      </div>
-    )
   }
 
   if (pathname === '/profile') {
@@ -2520,148 +1977,194 @@ function App() {
             </p>
           </div>
 
-          {unifiedPlayFeatureFlags.unifiedPlayV1 && (
-            <section className="mt-6 rounded-xl border border-cyan-500/50 bg-cyan-950/20 p-4">
+          <section className="mt-6 rounded-xl border border-cyan-500/50 bg-cyan-950/20 p-4">
             <h2 className="text-lg font-semibold text-cyan-100">Choose your next mission</h2>
-            <p className="mt-1 text-sm text-cyan-50/90">Start instantly with AI, or jump online in seconds.</p>
+            <p className="mt-1 text-sm text-cyan-50/90">Pick one mode, configure it, and start.</p>
 
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
+            <div className="mt-3 grid gap-2 md:grid-cols-3">
               <button
                 type="button"
-                className="rounded-lg border border-cyan-300/70 bg-cyan-900/30 px-4 py-3 text-left text-cyan-50"
-                onClick={handleStartInstantAdventure}
+                className={`rounded-lg border px-4 py-3 text-left ${
+                  homeStartMode === 'INSTANT'
+                    ? 'border-cyan-300/90 bg-cyan-900/40 text-cyan-50'
+                    : 'border-slate-400/70 bg-slate-900/60 text-slate-100'
+                }`}
+                onClick={() => handleSelectHomeStartMode('INSTANT')}
               >
                 <p className="text-sm font-semibold">Instant Adventure</p>
-                <p className="mt-1 text-xs text-cyan-100/90">Start now vs AI rivals. No waiting.</p>
+                <p className="mt-1 text-xs">Single player vs AI opponents.</p>
               </button>
 
               <button
                 type="button"
-                className="rounded-lg border border-emerald-300/70 bg-emerald-900/30 px-4 py-3 text-left text-emerald-50 disabled:opacity-50"
-                onClick={handleStartQuickOnline}
-                disabled={!multiplayerEligibility.eligible || isOnlineMode}
+                className={`rounded-lg border px-4 py-3 text-left ${
+                  homeStartMode === 'HOTSEAT'
+                    ? 'border-cyan-300/90 bg-cyan-900/40 text-cyan-50'
+                    : 'border-slate-400/70 bg-slate-900/60 text-slate-100'
+                }`}
+                onClick={() => handleSelectHomeStartMode('HOTSEAT')}
               >
-                <p className="text-sm font-semibold">Quick Online Match</p>
-                <p className="mt-1 text-xs text-emerald-100/90">Find players fast. Auto-fill AI if needed.</p>
+                <p className="text-sm font-semibold">Hotseat Multiplayer</p>
+                <p className="mt-1 text-xs">Local turn-by-turn multiplayer.</p>
               </button>
 
               <button
                 type="button"
-                className="rounded-lg border border-slate-400/70 bg-slate-900/60 px-4 py-3 text-left text-slate-100"
-                onClick={handlePlayWithFriendsEntry}
+                className={`rounded-lg border px-4 py-3 text-left ${
+                  homeStartMode === 'ONLINE'
+                    ? 'border-cyan-300/90 bg-cyan-900/40 text-cyan-50'
+                    : 'border-slate-400/70 bg-slate-900/60 text-slate-100'
+                }`}
+                onClick={() => handleSelectHomeStartMode('ONLINE')}
               >
-                <p className="text-sm font-semibold">Play With Friends</p>
-                <p className="mt-1 text-xs text-slate-300">Invite by code or pick friends.</p>
-              </button>
-
-              <button
-                type="button"
-                className="rounded-lg border border-slate-400/70 bg-slate-900/60 px-4 py-3 text-left text-slate-100"
-                onClick={handleCustomSetupEntry}
-              >
-                <p className="text-sm font-semibold">Custom Setup</p>
-                <p className="mt-1 text-xs text-slate-300">Choose every opponent and slot.</p>
+                <p className="text-sm font-semibold">Online Match</p>
+                <p className="mt-1 text-xs">Find humans or match online fast.</p>
               </button>
             </div>
 
             {!multiplayerEligibility.eligible && (
-              <p className="mt-2 text-xs text-slate-300">Log in on Profile to enable online quick match and friend play.</p>
+              <p className="mt-2 text-xs text-slate-300">Log in on Profile to enable Online Match.</p>
             )}
+          </section>
+
+          {homeStartMode === 'INSTANT' && (
+            <section className="mt-6 grid gap-3 lg:grid-cols-4">
+              <label className="flex flex-col gap-1 text-sm text-slate-200">
+                AI Difficulty
+                <select
+                  className="rounded-md border border-slate-600 bg-slate-900 p-2"
+                  value={difficulty}
+                  onChange={(event) => setDifficulty(event.target.value as Difficulty)}
+                >
+                  <option value="easy">Easy</option>
+                  <option value="medium">Medium</option>
+                </select>
+              </label>
+
+              <label className="flex flex-col gap-1 text-sm text-slate-200">
+                Your Name
+                <input
+                  className="rounded-md border border-slate-600 bg-slate-900 p-2"
+                  value={humanName}
+                  onChange={(event) => setHumanName(event.target.value)}
+                />
+              </label>
+
+              <label className="flex flex-col gap-1 text-sm text-slate-200">
+                AI Opponents
+                <select
+                  className="rounded-md border border-slate-600 bg-slate-900 p-2"
+                  value={aiCount}
+                  onChange={(event) => setAiCount(Number(event.target.value))}
+                >
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                </select>
+              </label>
             </section>
           )}
 
-          <div className="mt-6 grid gap-3 lg:grid-cols-4">
-            <label className="flex flex-col gap-1 text-sm text-slate-200">
-              Mode
-              <select
-                className="rounded-md border border-slate-600 bg-slate-900 p-2"
-                value={mode}
-                onChange={(event) => setMode(event.target.value as GameMode)}
-              >
-                <option value="single">Single Player</option>
-                <option value="hotseat">Hotseat Multiplayer</option>
-                <option value="multiplayer">Multiplayer</option>
-              </select>
-            </label>
+          {homeStartMode === 'HOTSEAT' && (
+            <section className="mt-6 grid gap-3 lg:grid-cols-4">
+              <label className="flex flex-col gap-1 text-sm text-slate-200">
+                Players
+                <select
+                  className="rounded-md border border-slate-600 bg-slate-900 p-2"
+                  value={hotseatCount}
+                  onChange={(event) => setHotseatCount(Number(event.target.value))}
+                >
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                  <option value={4}>4</option>
+                </select>
+              </label>
 
-            {mode === 'single' && (
-              <>
-                <label className="flex flex-col gap-1 text-sm text-slate-200">
-                  AI Difficulty
-                  <select
-                    className="rounded-md border border-slate-600 bg-slate-900 p-2"
-                    value={difficulty}
-                    onChange={(event) => setDifficulty(event.target.value as Difficulty)}
+              <label className="flex flex-col gap-1 text-sm text-slate-200 md:col-span-2">
+                Player Names (comma-separated)
+                <input
+                  className="rounded-md border border-slate-600 bg-slate-900 p-2"
+                  value={hotseatNames}
+                  onChange={(event) => setHotseatNames(event.target.value)}
+                  placeholder="Capt1, Capt2"
+                />
+              </label>
+            </section>
+          )}
+
+          {homeStartMode === 'ONLINE' && (
+            <section className="mt-6 space-y-3 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-200">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2 rounded border border-slate-700 bg-slate-950/40 p-2">
+                  <p className="font-semibold text-cyan-200">Waiting humans</p>
+                  {availableNowPlayers.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {availableNowPlayers.map((seat) => (
+                        <button
+                          key={`waiting-human-${seat.userId}`}
+                          type="button"
+                          className="flex w-full items-center gap-2 rounded border border-slate-700 px-2 py-1 text-left transition hover:border-cyan-400/70 disabled:opacity-50"
+                          onClick={() => {
+                            void handleSelectWaitingHuman(seat)
+                          }}
+                          disabled={!multiplayerEligibility.eligible || isOnlineMode}
+                        >
+                          <img
+                            src={PLAYER_AVATAR_FALLBACK_SRC}
+                            alt={`${seat.displayName} avatar`}
+                            className="h-7 w-7 rounded border border-slate-600 object-cover"
+                            onError={withAvatarFallback}
+                          />
+                          <span className="truncate text-sm">{seat.displayName}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-400">No waiting players right now.</p>
+                  )}
+                </div>
+
+                <div className="space-y-2 rounded border border-slate-700 bg-slate-950/40 p-2">
+                  <p className="font-semibold text-cyan-200">AI opponents</p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {AI_CHARACTERS.slice(0, 6).map((aiCharacter) => (
+                      <button
+                        key={`online-ai-${aiCharacter.slug}`}
+                        type="button"
+                        className="flex w-full items-center gap-2 rounded border border-slate-700 px-2 py-1 text-left transition hover:border-cyan-400/70 disabled:opacity-50"
+                        onClick={() => {
+                          void handleStartOnlineAiMatch(aiCharacter.slug)
+                        }}
+                        disabled={!multiplayerEligibility.eligible || isOnlineMode}
+                      >
+                        <img
+                          src={aiCharacter.thumbnailSrc}
+                          alt={`${aiCharacter.shortName} thumbnail`}
+                          className="h-7 w-7 rounded border border-slate-600 object-cover"
+                          onError={withOpponentThumbnailFallback}
+                        />
+                        <span className="truncate text-sm">{aiCharacter.shortName}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-2">
+                {!isAuthenticated && (
+                  <Link
+                    to="/profile"
+                    className="rounded-md border border-cyan-400 bg-cyan-900/30 px-4 py-2 text-sm font-semibold text-cyan-100"
                   >
-                    <option value="easy">Easy</option>
-                    <option value="medium">Medium</option>
-                  </select>
-                </label>
+                    Log In for Online Match
+                  </Link>
+                )}
+              </div>
+            </section>
+          )}
 
-                <label className="flex flex-col gap-1 text-sm text-slate-200">
-                  Your Name
-                  <input
-                    className="rounded-md border border-slate-600 bg-slate-900 p-2"
-                    value={humanName}
-                    onChange={(event) => setHumanName(event.target.value)}
-                  />
-                </label>
-
-                <label className="flex flex-col gap-1 text-sm text-slate-200">
-                  AI Opponents
-                  <select
-                    className="rounded-md border border-slate-600 bg-slate-900 p-2"
-                    value={aiCount}
-                    onChange={(event) => setAiCount(Number(event.target.value))}
-                  >
-                    <option value={1}>1</option>
-                    <option value={2}>2</option>
-                    <option value={3}>3</option>
-                  </select>
-                </label>
-              </>
-            )}
-
-            {mode === 'hotseat' && (
-              <>
-                <label className="flex flex-col gap-1 text-sm text-slate-200">
-                  Players
-                  <select
-                    className="rounded-md border border-slate-600 bg-slate-900 p-2"
-                    value={hotseatCount}
-                    onChange={(event) => setHotseatCount(Number(event.target.value))}
-                  >
-                    <option value={2}>2</option>
-                    <option value={3}>3</option>
-                    <option value={4}>4</option>
-                  </select>
-                </label>
-
-                <label className="flex flex-col gap-1 text-sm text-slate-200 md:col-span-2">
-                  Player Names (comma-separated)
-                  <input
-                    className="rounded-md border border-slate-600 bg-slate-900 p-2"
-                    value={hotseatNames}
-                    onChange={(event) => setHotseatNames(event.target.value)}
-                    placeholder="Capt1, Capt2"
-                  />
-                </label>
-              </>
-            )}
-
-          </div>
-
-          <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-2">
-            {mode === 'multiplayer' && !isAuthenticated && (
-              <Link
-                to="/profile"
-                className="rounded-md border border-cyan-400 bg-cyan-900/30 px-4 py-2 text-sm font-semibold text-cyan-100"
-              >
-                Log In for Multiplayer mode
-              </Link>
-            )}
-
-            {mode !== 'multiplayer' && (
+          {(homeStartMode === 'INSTANT' || homeStartMode === 'HOTSEAT') && (
+            <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-2">
               <button
                 type="button"
                 className="rounded-md bg-cyan-500 px-5 py-2 font-semibold text-slate-950 lg:whitespace-nowrap"
@@ -2670,242 +2173,11 @@ function App() {
               >
                 Start Game
               </button>
-            )}
-
-            {mode === 'multiplayer' && (
-              <>
-                <button
-                  type="button"
-                  className="rounded-md border border-cyan-400 bg-cyan-900/30 px-5 py-2 font-semibold text-cyan-100 lg:whitespace-nowrap disabled:opacity-50"
-                  onClick={() => {
-                    void handleStartOnlineMatch()
-                  }}
-                  disabled={!multiplayerEligibility.eligible || isOnlineMode}
-                >
-                  Start Online Match
-                </button>
-
-                <div className="flex w-full items-center gap-2 lg:max-w-sm">
-                  <input
-                    className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-sm"
-                    value={onlineJoinCode}
-                    onChange={(event) => setOnlineJoinCode(event.target.value)}
-                    placeholder="Invite code (e.g. roll1)"
-                  />
-                  <button
-                    type="button"
-                    className="rounded-md border border-slate-500 px-3 py-2 text-sm font-semibold text-slate-100 disabled:opacity-50"
-                    onClick={() => {
-                      void joinOnlineMatchByCode(onlineJoinCode)
-                    }}
-                    disabled={!multiplayerEligibility.eligible}
-                  >
-                    Join Code
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-
-          {mode === 'multiplayer' && unifiedPlayFeatureFlags.hybridRematchReplacementV1 && (
-            <section className="mt-3 space-y-2 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-200">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-cyan-100">Hybrid slot planner (MVP)</p>
-                <p className="text-[11px] text-slate-300">{hybridSlotSummary}</p>
-              </div>
-
-              <div className="grid gap-2 sm:grid-cols-3">
-                {hybridSlotPlan.map((slotMode, index) => (
-                  <label key={`hybrid-slot-${index + 1}`} className="flex flex-col gap-1 rounded border border-slate-700 bg-slate-950/40 p-2">
-                    <span className="text-[11px] text-slate-300">Seat {index + 1}</span>
-                    <select
-                      className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-100"
-                      value={slotMode}
-                      onChange={(event) => handleHybridSlotModeChange(index, event.target.value as HybridSeatMode)}
-                    >
-                      <option value="auto">Auto</option>
-                      <option value="human">Human only</option>
-                      <option value="ai">AI only</option>
-                    </select>
-                  </label>
-                ))}
-              </div>
-
-              <p className="text-[11px] text-slate-400">
-                Planner is active for UI flow now; seat enforcement lands with rematch lobby wiring.
-              </p>
-            </section>
+            </div>
           )}
 
-          {mode === 'multiplayer' && multiplayerEligibility.eligible && unifiedPlayFeatureFlags.presenceDirectoryV1 && (
-            <section className="mt-3 space-y-3 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-200">
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-700 bg-slate-950/50 px-2 py-1.5">
-                <p className="text-[11px] text-slate-300">Presence visibility</p>
-                <select
-                  className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-[11px] text-slate-100"
-                  value={presenceVisibility}
-                  onChange={(event) => {
-                    void handlePresenceVisibilityChange(event.target.value as PresenceVisibility)
-                  }}
-                >
-                  <option value="discoverable">Discoverable</option>
-                  <option value="friends-only">Friends-only discoverable</option>
-                  <option value="private">Private</option>
-                </select>
-              </div>
 
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded border border-slate-700 bg-slate-950/50 px-2 py-1.5">
-                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Players online now</p>
-                  <p className="mt-0.5 text-sm font-semibold text-cyan-100">{playersOnlineNowCount}</p>
-                </div>
-                <div className="rounded border border-slate-700 bg-slate-950/50 px-2 py-1.5">
-                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Players searching</p>
-                  <p className="mt-0.5 text-sm font-semibold text-cyan-100">{playersSearchingNowCount}</p>
-                </div>
-                <div className="rounded border border-slate-700 bg-slate-950/50 px-2 py-1.5">
-                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Estimated wait</p>
-                  <p className="mt-0.5 text-sm font-semibold text-cyan-100">{estimatedWaitLabel}</p>
-                </div>
-                <div className="rounded border border-slate-700 bg-slate-950/50 px-2 py-1.5">
-                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Region</p>
-                  <p className="mt-0.5 truncate text-sm font-semibold text-cyan-100">{matchmakingRegionLabel}</p>
-                </div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="space-y-1 rounded border border-slate-700 bg-slate-950/40 p-2">
-                  <p className="font-semibold text-cyan-200">Available now</p>
-                  {availableNowPlayers.length > 0 ? (
-                    availableNowPlayers.map((seat) => (
-                      <div key={`available-${seat.userId}`} className="space-y-1 rounded border border-slate-700 px-1.5 py-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="truncate">{seat.displayName}</span>
-                          <button
-                            type="button"
-                            className="rounded border border-slate-500 px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
-                            onClick={() => {
-                              setPartyInviteTargetDisplayName(seat.displayName)
-                              setOnlineStatusMessage(`Selected ${seat.displayName} for invite.`)
-                            }}
-                            disabled={!onlineSessionId}
-                          >
-                            Invite
-                          </button>
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          <button
-                            type="button"
-                            className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px]"
-                            onClick={() => {
-                              void handleModerationAction(seat.displayName, 'BLOCK')
-                            }}
-                          >
-                            Block
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px]"
-                            onClick={() => {
-                              void handleModerationAction(seat.displayName, 'MUTE')
-                            }}
-                          >
-                            Mute
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px]"
-                            onClick={() => {
-                              void handleModerationAction(seat.displayName, 'REPORT')
-                            }}
-                          >
-                            Report
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-[11px] text-slate-400">No available players right now.</p>
-                  )}
-                </div>
-
-                <div className="space-y-1 rounded border border-slate-700 bg-slate-950/40 p-2">
-                  <p className="font-semibold text-cyan-200">Friends online</p>
-                  {friendsOnlineEntries.map((entry) => (
-                    <div key={`friend-online-${entry.userId}`} className="space-y-1 rounded border border-slate-700 px-1.5 py-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate">{entry.displayName}</span>
-                        <button
-                          type="button"
-                          className="rounded border border-slate-500 px-2 py-0.5 text-[10px] font-semibold disabled:opacity-50"
-                          onClick={() => {
-                            setPartyInviteTargetDisplayName(entry.displayName)
-                            setOnlineStatusMessage(`Selected ${entry.displayName} for invite.`)
-                          }}
-                          disabled={!onlineSessionId}
-                        >
-                          Invite
-                        </button>
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        <button
-                          type="button"
-                          className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px]"
-                          onClick={() => {
-                            void handleModerationAction(entry.displayName, 'BLOCK')
-                          }}
-                        >
-                          Block
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px]"
-                          onClick={() => {
-                            void handleModerationAction(entry.displayName, 'MUTE')
-                          }}
-                        >
-                          Mute
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px]"
-                          onClick={() => {
-                            void handleModerationAction(entry.displayName, 'REPORT')
-                          }}
-                        >
-                          Report
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {friendsOnlineEntries.length === 0 && <p className="text-[11px] text-slate-400">No friends available yet.</p>}
-                </div>
-
-                <div className="space-y-1 rounded border border-slate-700 bg-slate-950/40 p-2">
-                  <p className="font-semibold text-cyan-200">Join next game</p>
-                  {joinNextGameEntries.map((invite) => (
-                      <div key={`join-next-${invite.id}`} className="flex items-center justify-between gap-2">
-                        <span className="truncate">{invite.fromDisplayName ?? 'Unknown'} lobby</span>
-                        <button
-                          type="button"
-                          className="rounded border border-slate-500 px-2 py-0.5 text-[10px] font-semibold"
-                          onClick={() => {
-                            void handleRespondPartyInvite(invite.id, 'ACCEPT')
-                          }}
-                        >
-                          Join
-                        </button>
-                      </div>
-                    ))}
-                  {joinNextGameEntries.length === 0 && (
-                    <p className="text-[11px] text-slate-400">No rematch lobby invites right now.</p>
-                  )}
-                </div>
-              </div>
-            </section>
-          )}
-
-          {mode === 'multiplayer' && (onlineStatusMessage || onlineError || onlineSessionId || matchStartState !== 'IDLE') && (
+          {homeStartMode === 'ONLINE' && mode === 'multiplayer' && (onlineStatusMessage || onlineError || onlineSessionId || matchStartState !== 'IDLE') && (
             <div className="mt-3 space-y-2 rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-200">
               {matchStartState !== 'IDLE' && matchStartStateCopy[matchStartState] && (
                 <div className="rounded-md border border-cyan-400/40 bg-cyan-900/20 px-2 py-1.5">
@@ -2913,17 +2185,15 @@ function App() {
                   <p className="mt-0.5 text-cyan-200/90">{matchStartStateCopy[matchStartState]?.detail}</p>
                 </div>
               )}
-              {quickOnlineFlowActive && matchStartState === 'WAITING_USER_DECISION' && (
+              {onlineWaitState === 'WAITING_DECISION' && (
                 <div className="flex flex-wrap gap-2">
-                  {unifiedPlayFeatureFlags.hybridRematchReplacementV1 && (
-                    <button
-                      type="button"
-                      className="rounded-md border border-cyan-300 px-2 py-1 text-[11px] font-semibold text-cyan-100"
-                      onClick={handleStartWithAiFallback}
-                    >
-                      Start with AI now
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="rounded-md border border-cyan-300 px-2 py-1 text-[11px] font-semibold text-cyan-100"
+                    onClick={handleStartWithAiFallback}
+                  >
+                    Instant Adventure
+                  </button>
                   <button
                     type="button"
                     className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100"
@@ -2957,33 +2227,7 @@ function App() {
                   >
                     Refresh Snapshot
                   </button>
-                  <button
-                    type="button"
-                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100 disabled:opacity-50"
-                    onClick={() => {
-                      void handleCreateInviteCode()
-                    }}
-                    disabled={!onlineSessionId || !multiplayerEligibility.eligible}
-                  >
-                    Create Invite Code
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100 disabled:opacity-50"
-                    onClick={() => {
-                      void handleCopyInviteLink()
-                    }}
-                    disabled={!onlineInviteCode}
-                  >
-                    Copy Invite Link
-                  </button>
                 </div>
-              )}
-              {onlineInviteCode && (
-                <p>
-                  Invite code: <span className="font-semibold text-cyan-200">{onlineInviteCode}</span>
-                  {onlineInviteExpiry ? ` (expires ${new Date(onlineInviteExpiry).toLocaleTimeString()})` : ''}
-                </p>
               )}
               {onlineStatusMessage && (
                 <p
@@ -3002,138 +2246,6 @@ function App() {
             </div>
           )}
 
-          {mode === 'multiplayer' && multiplayerEligibility.eligible && (
-            <div className="mt-3 grid gap-3 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-200 md:grid-cols-2">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="font-semibold text-cyan-200">Friends</p>
-                  <button
-                    type="button"
-                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100 disabled:opacity-50"
-                    onClick={() => {
-                      void refreshSocialData()
-                    }}
-                    disabled={socialLoading}
-                  >
-                    {socialLoading ? 'Refreshing…' : 'Refresh'}
-                  </button>
-                </div>
-
-                <div className="flex gap-2">
-                  <input
-                    className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-xs"
-                    value={friendTargetDisplayName}
-                    onChange={(event) => setFriendTargetDisplayName(event.target.value)}
-                    placeholder="Friend display name"
-                  />
-                  <button
-                    type="button"
-                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100"
-                    onClick={() => {
-                      void handleSendFriendRequest()
-                    }}
-                  >
-                    Add
-                  </button>
-                </div>
-
-                <p className="text-[11px] text-slate-300">
-                  Friends: {friends.length} • Incoming: {incomingFriendRequests.length} • Outgoing: {outgoingFriendRequests.length}
-                </p>
-
-                <div className="space-y-1">
-                  {incomingFriendRequests.slice(0, 3).map((entry) => (
-                    <div key={`incoming-${entry.userId}`} className="flex items-center justify-between gap-2 rounded border border-slate-700 px-2 py-1">
-                      <span>{entry.displayName}</span>
-                      <div className="flex gap-1">
-                        <button
-                          type="button"
-                          className="rounded border border-slate-500 px-2 py-0.5 text-[10px] font-semibold"
-                          onClick={() => {
-                            void handleRespondFriendRequest(entry.userId, entry.displayName, 'ACCEPT')
-                          }}
-                        >
-                          Accept
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded border border-slate-500 px-2 py-0.5 text-[10px] font-semibold"
-                          onClick={() => {
-                            void handleRespondFriendRequest(entry.userId, entry.displayName, 'DECLINE')
-                          }}
-                        >
-                          Decline
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <p className="font-semibold text-cyan-200">Party Invites</p>
-                <div className="flex gap-2">
-                  <select
-                    className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 p-2 text-xs"
-                    value={partyInviteTargetDisplayName}
-                    onChange={(event) => setPartyInviteTargetDisplayName(event.target.value)}
-                  >
-                    <option value="">Select friend…</option>
-                    {friends.map((entry) => (
-                      <option key={entry.userId} value={entry.displayName}>
-                        {entry.displayName}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100 disabled:opacity-50"
-                    onClick={() => {
-                      void handleSendPartyInvite()
-                    }}
-                    disabled={!onlineSessionId}
-                  >
-                    Invite
-                  </button>
-                </div>
-
-                <p className="text-[11px] text-slate-300">
-                  Received: {receivedPartyInvites.length} • Sent: {sentPartyInvites.length}
-                </p>
-
-                <div className="space-y-1">
-                  {receivedPartyInvites
-                    .filter((invite) => invite.status === 'pending')
-                    .slice(0, 3)
-                    .map((invite) => (
-                      <div key={invite.id} className="flex items-center justify-between gap-2 rounded border border-slate-700 px-2 py-1">
-                        <span>{invite.fromDisplayName ?? 'Unknown'} invited you</span>
-                        <div className="flex gap-1">
-                          <button
-                            type="button"
-                            className="rounded border border-slate-500 px-2 py-0.5 text-[10px] font-semibold"
-                            onClick={() => {
-                              void handleRespondPartyInvite(invite.id, 'ACCEPT')
-                            }}
-                          >
-                            Accept
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded border border-slate-500 px-2 py-0.5 text-[10px] font-semibold"
-                            onClick={() => {
-                              void handleRespondPartyInvite(invite.id, 'DECLINE')
-                            }}
-                          >
-                            Decline
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            </div>
-          )}
 
           <div className="mt-6 grid gap-3 md:grid-cols-3">
             <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
@@ -3159,7 +2271,7 @@ function App() {
             </article>
           </div>
 
-          {mode === 'multiplayer' && SHOW_DEBUG_CONTROLS && (
+          {homeStartMode === 'ONLINE' && mode === 'multiplayer' && SHOW_DEBUG_CONTROLS && (
             <section className="mt-4 space-y-2 rounded-md border border-slate-700 bg-slate-900/50 p-3 text-xs text-slate-300">
               <p className="font-semibold text-slate-200">Temporary Debug (remove later)</p>
               <div className="flex flex-col gap-2 lg:flex-row lg:items-center">

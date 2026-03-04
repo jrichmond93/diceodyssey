@@ -44,6 +44,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
+  sendJson(res, 410, {
+    error: 'DIRECT_MATCH_DISABLED',
+  })
+  return
+
   const body = await readJsonBody<InviteCodeBody>(req)
   const sessionId = (body.sessionId ?? '').trim()
 
