@@ -5,6 +5,7 @@ import { publishSessionRealtimeEventBestEffort } from '../_lib/realtime.js'
 import { createHybridGameState } from '../_lib/serverGameState.js'
 import { mapSessionSnapshot, type SeatRow, type SessionRow } from '../_lib/sessionSnapshot.js'
 import { getSupabaseAdminClient } from '../_lib/supabase.js'
+import { DEFAULT_PLAYER_AVATAR_KEY } from '../../src/multiplayer/avatarCatalog.js'
 
 interface RematchBody {
   sessionId?: string
@@ -294,7 +295,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .update({
           user_id: assignment.userId,
           display_name: assignment.displayName,
-          avatar_key: assignment.avatarKey ?? null,
+          avatar_key: assignment.avatarKey ?? DEFAULT_PLAYER_AVATAR_KEY,
           connected: assignment.connected,
           is_ai: assignment.isAI,
           updated_at: now,

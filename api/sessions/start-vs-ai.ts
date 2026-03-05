@@ -6,6 +6,7 @@ import { publishSessionRealtimeEventBestEffort } from '../_lib/realtime.js'
 import { mapSessionSnapshot, type SeatRow, type SessionRow } from '../_lib/sessionSnapshot.js'
 import { createHybridGameState } from '../_lib/serverGameState.js'
 import { resolveUserProfileIdentity } from '../_lib/displayName.js'
+import { DEFAULT_PLAYER_AVATAR_KEY } from '../../src/multiplayer/avatarCatalog.js'
 
 interface StartVsAiBody {
   aiSlug?: string
@@ -139,7 +140,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         seat: 2,
         user_id: aiUserId,
         display_name: aiDisplayName,
-        avatar_key: null,
+        avatar_key: DEFAULT_PLAYER_AVATAR_KEY,
         connected: true,
         is_ai: true,
         created_at: now,
@@ -166,7 +167,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         seat: 2,
         user_id: aiUserId,
         display_name: aiDisplayName,
-        avatar_key: null,
+        avatar_key: DEFAULT_PLAYER_AVATAR_KEY,
         connected: true,
         is_ai: true,
       },
