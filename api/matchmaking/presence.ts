@@ -166,19 +166,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     })
 
-    const canViewerSeeUser = (targetUserId: string): boolean => {
-      const visibility = visibilityByUserId.get(targetUserId) ?? 'discoverable'
-      if (visibility === 'discoverable') {
-        return true
-      }
-
-      if (visibility === 'private') {
-        return false
-      }
-
-      return acceptedFriends.has(targetUserId)
-    }
-
     const connectedHumanSeats = (seatsResult.data ?? []).filter(
       (seat) => {
         if (seat.connected !== true || seat.is_ai === true) {

@@ -635,7 +635,7 @@ function App() {
 
       return Array.from(uniqueByUserId.values()).slice(0, 3)
     },
-    [multiplayerIdentity?.userId, onlineSessionId, onlineSnapshot, presenceSnapshot?.availableNow],
+    [multiplayerIdentity?.userId, onlineSessionId, onlineSnapshot, presenceSnapshot],
   )
 
 
@@ -1258,7 +1258,10 @@ function App() {
           clientRequestId: crypto.randomUUID(),
         }),
       })
-    } catch {
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.debug('[online] best-effort lobby leave failed', error)
+      }
     } finally {
       await detachOnlineSession()
       void refreshPresenceData()
@@ -1267,11 +1270,6 @@ function App() {
 
   const handleStartOnlineAiMatch = useCallback(
     async (aiSlug: string) => {
-      if (!multiplayerEligibility.eligible) {
-        setOnlineError('Login is required before starting an online match.')
-        return
-      }
-
       const aiCharacter = findAICharacterBySlug(aiSlug)
       const aiLabel = aiCharacter?.shortName ?? 'AI Rival'
 
@@ -1280,67 +1278,17 @@ function App() {
         targetId: aiSlug,
       })
 
-      setMode('multiplayer')
-      setQuickOnlineFlowActive(false)
-      setOnlineWaitState('IDLE')
-      setOnlinePrimaryTimerExpiresAt(null)
-      setOnlineDecisionTimerExpiresAt(null)
       setOnlineError(null)
-      setOnlineStatusMessage(`Starting online match versus ${aiLabel}...`)
+      setOnlineStatusMessage(`Starting ${aiLabel} adventure...`)
       setMatchStartStateTracked('STARTING', {
         entryPoint: 'FAST_ONLINE',
         targetType: 'ai',
       })
 
-      try {
-        await leaveCurrentLobbySessionIfNeeded()
-
-        const token = await getApiAccessToken()
-        const response = await fetch('/api/sessions/start-vs-ai', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            aiSlug,
-          }),
-        })
-
-        if (!response.ok) {
-          throw new Error(await buildApiErrorMessage(response, 'Start versus AI failed'))
-        }
-
-        const body = (await response.json()) as { sessionId: string }
-        setOnlineSessionId(body.sessionId)
-        await connectOnlineSession(body.sessionId)
-        setMatchStartStateTracked('ENTERED_MATCH', {
-          entryPoint: 'FAST_ONLINE',
-          targetType: 'ai',
-          sessionId: body.sessionId,
-        })
-        trackUnifiedPlayEvent('online_match_started', {
-          targetType: 'ai',
-          sessionId: body.sessionId,
-          aiSlug,
-        })
-      } catch (error) {
-        setOnlineError(error instanceof Error ? error.message : 'Failed to start online AI match.')
-        setOnlineStatusMessage(null)
-        setMatchStartStateTracked('ERROR', {
-          entryPoint: 'FAST_ONLINE',
-          targetType: 'ai',
-        })
-      }
+      await leaveCurrentLobbySessionIfNeeded()
+      handleStartInstantAdventure()
     },
-    [
-      connectOnlineSession,
-      getApiAccessToken,
-      leaveCurrentLobbySessionIfNeeded,
-      multiplayerEligibility.eligible,
-      setMatchStartStateTracked,
-      trackUnifiedPlayEvent,
-    ],
+    [handleStartInstantAdventure, leaveCurrentLobbySessionIfNeeded, setMatchStartStateTracked, trackUnifiedPlayEvent],
   )
 
   const handleSelectHomeStartMode = useCallback(
