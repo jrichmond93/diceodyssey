@@ -581,6 +581,9 @@ function App() {
       (onlineStatusMessage.includes('Opponent left the match.') ||
         onlineStatusMessage.includes('Match ended because a player left.')),
   )
+  const isWaitingForPlayersMessage = Boolean(
+    onlineStatusMessage && onlineStatusMessage.toLowerCase().includes('waiting for players'),
+  )
 
   const availableNowPlayers = useMemo(
     () => {
@@ -1347,28 +1350,17 @@ function App() {
 
   const handleStartWithAiFallback = useCallback(() => {
     trackUnifiedPlayEvent('online_wait_instant_adventure_clicked')
-    trackUnifiedPlayEvent('auto_fill_triggered', {
-      reason: 'user_choice',
-      entryPoint: 'FAST_ONLINE',
-      openSeatCount: 1,
-    })
 
-    setMatchStartStateTracked('AUTO_FILLING_AI', {
-      entryPoint: 'FAST_ONLINE',
-      reason: 'USER_CHOICE',
-    })
     setOnlineWaitState('IDLE')
     setOnlinePrimaryTimerExpiresAt(null)
     setOnlineDecisionTimerExpiresAt(null)
-    setOnlineStatusMessage('No full lobby yet—starting instantly with AI.')
+    setOnlineStatusMessage('Switching to Instant Adventure setup...')
 
-    window.setTimeout(() => {
-      setMatchStartStateTracked('STARTING', {
-        entryPoint: 'FAST_ONLINE',
-      })
-      handleStartInstantAdventure()
-    }, 220)
-  }, [handleStartInstantAdventure, setMatchStartStateTracked, trackUnifiedPlayEvent])
+    void (async () => {
+      await leaveCurrentLobbySessionIfNeeded()
+      handleSelectHomeStartMode('INSTANT')
+    })()
+  }, [handleSelectHomeStartMode, leaveCurrentLobbySessionIfNeeded, trackUnifiedPlayEvent])
 
   const handleSelectWaitingHuman = useCallback(
     async (seat: PresenceDirectoryEntry) => {
@@ -2138,7 +2130,7 @@ function App() {
                 onClick={() => handleSelectHomeStartMode('ONLINE')}
               >
                 <p className="text-sm font-semibold">Online Match</p>
-                <p className="mt-1 text-xs">Find humans or match online fast.</p>
+                <p className="mt-1 text-xs">Find others for online play.</p>
               </button>
             </div>
 
@@ -2305,7 +2297,38 @@ function App() {
                   <p className="mt-0.5 text-cyan-200/90">{matchStartStateCopy[matchStartState]?.detail}</p>
                 </div>
               )}
-              {onlineWaitState === 'WAITING_DECISION' && (
+              {onlineWaitState === 'WAITING_DECISION' && isWaitingForPlayersMessage && (
+                <div className="flex flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
+                  <button
+                    type="button"
+                    className="rounded-md border border-cyan-300 px-2 py-1 text-[11px] font-semibold text-cyan-100"
+                    onClick={handleStartWithAiFallback}
+                  >
+                    Instant Adventure
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100"
+                    onClick={handleKeepWaitingQuickOnline}
+                  >
+                    Keep waiting
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100 disabled:opacity-50"
+                    onClick={() => {
+                      void refreshOnlineSnapshot()
+                    }}
+                    disabled={!onlineSessionId}
+                  >
+                    Refresh Snapshot
+                  </button>
+                  <p className="text-cyan-200 xl:ml-1" role="status" aria-live="polite">
+                    {onlineStatusMessage}
+                  </p>
+                </div>
+              )}
+              {onlineWaitState === 'WAITING_DECISION' && !isWaitingForPlayersMessage && (
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -2349,7 +2372,7 @@ function App() {
                   </button>
                 </div>
               )}
-              {onlineStatusMessage && (
+              {onlineStatusMessage && !isWaitingForPlayersMessage && (
                 <p
                   className={
                     isOnlineStatusWarning
