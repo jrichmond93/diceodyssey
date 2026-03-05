@@ -1192,20 +1192,22 @@ function App() {
     })
   }
 
-  const handleStartInstantAdventure = useCallback(() => {
+  const handleStartInstantAdventure = useCallback((options?: { aiCount?: number; selectedAiSlug?: string }) => {
+    const localAiCount = options?.aiCount ?? 2
     const instantName = (profileDisplayName?.trim() || humanName.trim() || 'Captain')
 
     trackUnifiedPlayEvent('play_start_clicked', {
       entryPoint: 'INSTANT_ADVENTURE',
-      aiCount: 2,
+      aiCount: localAiCount,
       difficulty: 'medium',
     })
 
     setQuickOnlineFlowActive(false)
+    setHomeStartMode('INSTANT')
     clearOnlineContextForOfflineStart()
     setMode('single')
     setDifficulty('medium')
-    setAiCount(2)
+    setAiCount(localAiCount)
     setOnlineError(null)
     setOnlineStatusMessage('Launching Instant Adventure...')
     setMatchStartStateTracked('ENTERED_MATCH', { entryPoint: 'INSTANT_ADVENTURE' })
@@ -1215,7 +1217,8 @@ function App() {
       payload: {
         mode: 'single',
         humanNames: [instantName],
-        aiCount: 2,
+        aiCount: localAiCount,
+        selectedAiSlugs: options?.selectedAiSlug ? [options.selectedAiSlug] : undefined,
         difficulty: 'medium',
         debugEnabled,
         animationEnabled,
@@ -1224,7 +1227,7 @@ function App() {
     trackUnifiedPlayEvent('match_entered', {
       entryPoint: 'INSTANT_ADVENTURE',
       humanCount: 1,
-      aiCount: 2,
+      aiCount: localAiCount,
     })
   }, [
     animationEnabled,
@@ -1280,13 +1283,17 @@ function App() {
 
       setOnlineError(null)
       setOnlineStatusMessage(`Starting ${aiLabel} adventure...`)
+      setHomeStartMode('INSTANT')
       setMatchStartStateTracked('STARTING', {
         entryPoint: 'FAST_ONLINE',
         targetType: 'ai',
       })
 
       await leaveCurrentLobbySessionIfNeeded()
-      handleStartInstantAdventure()
+      handleStartInstantAdventure({
+        aiCount: 1,
+        selectedAiSlug: aiSlug,
+      })
     },
     [handleStartInstantAdventure, leaveCurrentLobbySessionIfNeeded, setMatchStartStateTracked, trackUnifiedPlayEvent],
   )

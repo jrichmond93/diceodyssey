@@ -9,7 +9,7 @@ import {
   type Player,
   type TurnResolutionState,
 } from '../types'
-import { pickRandomUniqueAICharacters } from '../data/aiCharacters'
+import { findAICharacterBySlug, pickRandomUniqueAICharacters } from '../data/aiCharacters'
 import { rollDie } from '../utils/rollDie'
 import { resolveCurrentPlayerTurn as resolveCurrentPlayerTurnInEngine } from '../engine/gameEngine'
 
@@ -81,7 +81,26 @@ const createPlayers = (payload: InitGamePayload): Player[] => {
   }
 
   const humans = [makePlayer('human', payload.humanNames[0] || 'Human', false)]
-  const selectedCharacters = pickRandomUniqueAICharacters(payload.aiCount)
+
+  const preferredCharacters = (payload.selectedAiSlugs ?? [])
+    .map((slug) => findAICharacterBySlug(slug))
+    .filter((character): character is NonNullable<typeof character> => Boolean(character))
+
+  const randomCharacters = pickRandomUniqueAICharacters(payload.aiCount + preferredCharacters.length)
+  const selectedCharacters = [...preferredCharacters]
+
+  for (const character of randomCharacters) {
+    if (selectedCharacters.length >= payload.aiCount) {
+      break
+    }
+
+    if (selectedCharacters.some((selected) => selected.slug === character.slug)) {
+      continue
+    }
+
+    selectedCharacters.push(character)
+  }
+
   const ais = Array.from({ length: payload.aiCount }, (_, index) => {
     const character = selectedCharacters[index]
     if (!character) {

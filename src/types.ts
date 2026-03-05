@@ -134,6 +134,7 @@ export interface InitGamePayload {
   mode: GameMode
   humanNames: string[]
   aiCount: number
+  selectedAiSlugs?: string[]
   difficulty: Difficulty
   debugEnabled: boolean
   animationEnabled: boolean

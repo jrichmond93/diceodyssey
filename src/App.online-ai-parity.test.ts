@@ -21,7 +21,9 @@ describe('Online AI parity with Instant Adventure', () => {
     const handlerSource = appSource.slice(handlerStart, handlerEnd)
 
     expect(handlerSource).toContain('await leaveCurrentLobbySessionIfNeeded()')
-    expect(handlerSource).toContain('handleStartInstantAdventure()')
+    expect(handlerSource).toContain('handleStartInstantAdventure({')
+    expect(handlerSource).toContain('aiCount: 1')
+    expect(handlerSource).toContain('selectedAiSlug: aiSlug')
     expect(handlerSource).not.toContain("setMode('multiplayer')")
     expect(handlerSource).not.toContain('connectOnlineSession(')
     expect(handlerSource).not.toContain('/api/sessions/start-vs-ai')
