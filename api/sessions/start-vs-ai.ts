@@ -11,6 +11,33 @@ interface StartVsAiBody {
   aiSlug?: string
 }
 
+const getErrorDetail = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  if (error && typeof error === 'object') {
+    const candidate = error as {
+      message?: string
+      detail?: string
+      hint?: string
+      code?: string
+      error_description?: string
+    }
+
+    return (
+      candidate.message ||
+      candidate.detail ||
+      candidate.hint ||
+      candidate.error_description ||
+      candidate.code ||
+      JSON.stringify(error)
+    )
+  }
+
+  return String(error)
+}
+
 const normalizeAiSlug = (value: unknown): string => {
   if (typeof value !== 'string') {
     return 'rival'
@@ -47,6 +74,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const supabase = getSupabaseAdminClient()
     const identity = await resolveUserProfileIdentity(supabase, user)
+
+    const disconnectExistingSeats = await supabase
+      .from('dice_player_seats')
+      .update({
+        connected: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', user.userId)
+      .eq('connected', true)
+      .eq('is_ai', false)
+
+    if (disconnectExistingSeats.error) {
+      throw disconnectExistingSeats.error
+    }
 
     const sessionId = crypto.randomUUID()
     const now = new Date().toISOString()
@@ -158,7 +199,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     sendJson(res, 500, {
       error: 'START_VS_AI_FAILED',
-      detail: error instanceof Error ? error.message : 'Unknown error',
+      detail: getErrorDetail(error),
     })
   }
 }
