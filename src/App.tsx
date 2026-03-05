@@ -2346,7 +2346,7 @@ function App() {
                   </button>
                 </div>
               )}
-              {onlineSessionId && (
+              {onlineSessionId && (debugEnabled || !(onlineWaitState === 'WAITING_DECISION' && isWaitingForPlayersMessage)) && (
                 <div className="flex flex-wrap items-center gap-2">
                   {debugEnabled && <p>Online session: {onlineSessionId}</p>}
                   {debugEnabled && (
@@ -2360,16 +2360,18 @@ function App() {
                       Copy
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100 disabled:opacity-50"
-                    onClick={() => {
-                      void refreshOnlineSnapshot()
-                    }}
-                    disabled={!onlineSessionId}
-                  >
-                    Refresh Snapshot
-                  </button>
+                  {!(onlineWaitState === 'WAITING_DECISION' && isWaitingForPlayersMessage) && (
+                    <button
+                      type="button"
+                      className="rounded-md border border-slate-500 px-2 py-1 text-[11px] font-semibold text-slate-100 disabled:opacity-50"
+                      onClick={() => {
+                        void refreshOnlineSnapshot()
+                      }}
+                      disabled={!onlineSessionId}
+                    >
+                      Refresh Snapshot
+                    </button>
+                  )}
                 </div>
               )}
               {onlineStatusMessage && !isWaitingForPlayersMessage && (
