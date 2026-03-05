@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 
-const faqs = [
+export const FAQ_ITEMS = [
   {
     question: 'How do I start a game quickly?',
     answer:
@@ -72,7 +72,7 @@ export function FaqPage() {
       </section>
 
       <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        {faqs.map((item) => (
+        {FAQ_ITEMS.map((item) => (
           <article key={item.question} className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
             <h2 className="text-sm font-semibold text-cyan-200">{item.question}</h2>
             <p className="mt-1 text-sm text-slate-300">{item.answer}</p>

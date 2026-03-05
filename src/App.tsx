@@ -14,7 +14,7 @@ import { TurnControls } from './components/TurnControls'
 import { ResolveDiceAnimation } from './components/ResolveDiceAnimation'
 import { AboutPage } from './pages/AboutPage'
 import { ContactPage } from './pages/ContactPage'
-import { FaqPage } from './pages/FaqPage'
+import { FAQ_ITEMS, FaqPage } from './pages/FaqPage'
 import { LegalPage } from './pages/LegalPage'
 import { OpponentBioPage } from './pages/OpponentBioPage'
 import { OpponentsPage } from './pages/OpponentsPage'
@@ -53,6 +53,64 @@ const HUMAN_WIN_SCROLL_LEAD_MS = 260
 const ONLINE_PRIMARY_WAIT_TIMEOUT_MS = 60000
 const ONLINE_DECISION_WAIT_TIMEOUT_MS = 60000
 const SHOW_DEBUG_CONTROLS = /^(1|true)$/i.test(import.meta.env.VITE_SHOW_DEBUG_CONTROLS ?? '')
+const SITE_ORIGIN = 'https://diceodysseys.com'
+const DEFAULT_SOCIAL_IMAGE_PATH = '/assets/branding/dice-odyssey-logo.png'
+
+interface SeoMeta {
+  title: string
+  description: string
+  path: string
+  robots?: string
+  imagePath?: string
+}
+
+const upsertMetaTag = (attribute: 'name' | 'property', key: string, content: string) => {
+  let tag = document.head.querySelector<HTMLMetaElement>(`meta[${attribute}="${key}"]`)
+  if (!tag) {
+    tag = document.createElement('meta')
+    tag.setAttribute(attribute, key)
+    document.head.appendChild(tag)
+  }
+
+  tag.setAttribute('content', content)
+}
+
+const upsertCanonicalLink = (href: string) => {
+  let canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]')
+  if (!canonical) {
+    canonical = document.createElement('link')
+    canonical.setAttribute('rel', 'canonical')
+    document.head.appendChild(canonical)
+  }
+
+  canonical.setAttribute('href', href)
+}
+
+const upsertJsonLdScript = (id: string, payload: Record<string, unknown> | null) => {
+  const selector = `script[type="application/ld+json"][data-seo-id="${id}"]`
+  let script = document.head.querySelector<HTMLScriptElement>(selector)
+
+  if (!payload) {
+    script?.remove()
+    return
+  }
+
+  if (!script) {
+    script = document.createElement('script')
+    script.type = 'application/ld+json'
+    script.dataset.seoId = id
+    document.head.appendChild(script)
+  }
+
+  script.textContent = JSON.stringify(payload)
+}
+
+const buildAbsoluteUrl = (path: string): string => `${SITE_ORIGIN}${path === '/' ? '' : path}`
+
+const buildAbsoluteImageUrl = (path?: string): string => {
+  const imagePath = path ?? DEFAULT_SOCIAL_IMAGE_PATH
+  return imagePath.startsWith('http') ? imagePath : `${SITE_ORIGIN}${imagePath}`
+}
 
 const humanWinConfetti = [
   { left: 3, delay: 0, duration: 1850, colorClass: 'text-cyan-300' },
@@ -365,6 +423,237 @@ function App() {
     resolutionTimersRef.current.forEach((timer) => window.clearTimeout(timer))
     resolutionTimersRef.current = []
   }, [])
+
+  useEffect(() => {
+    const opponentCharacter = opponentBioSlug ? findAICharacterBySlug(opponentBioSlug) : undefined
+
+    const seo: SeoMeta = (() => {
+      if (pathname === '/about') {
+        return {
+          title: 'About Dice Odysseys | Rules, Strategy, and Game Overview',
+          description:
+            'Learn how Dice Odysseys works, explore core mechanics, and discover strategy tips for move, claim, and sabotage gameplay.',
+          path: '/about',
+        }
+      }
+
+      if (pathname === '/opponents') {
+        return {
+          title: 'Opponents | Dice Odysseys',
+          description:
+            'Meet the legendary rival captains in Dice Odysseys and learn their play styles, strengths, and tactical pressure patterns.',
+          path: '/opponents',
+        }
+      }
+
+      if (pathname === '/contact') {
+        return {
+          title: 'Contact | Dice Odysseys',
+          description:
+            'Contact the Dice Odysseys team for questions, support, feedback, and partnership inquiries.',
+          path: '/contact',
+        }
+      }
+
+      if (pathname === '/faq') {
+        return {
+          title: 'FAQ | Dice Odysseys',
+          description:
+            'Get quick answers to common Dice Odysseys questions, including gameplay, online matches, and tech stack details.',
+          path: '/faq',
+        }
+      }
+
+      if (pathname === '/legal') {
+        return {
+          title: 'Legal | Dice Odysseys',
+          description:
+            'Read the Dice Odysseys legal policies including Privacy Policy, Terms of Service, Cookie Policy, and DMCA information.',
+          path: '/legal',
+        }
+      }
+
+      if (pathname === '/profile') {
+        return {
+          title: 'Profile | Dice Odysseys',
+          description: 'Manage your Dice Odysseys player profile settings and preferences.',
+          path: '/profile',
+          robots: 'noindex,nofollow',
+        }
+      }
+
+      if (opponentBioSlug) {
+        if (!opponentCharacter) {
+          return {
+            title: 'Opponent Not Found | Dice Odysseys',
+            description: 'The requested opponent profile could not be found in Dice Odysseys.',
+            path: '/opponents',
+            robots: 'noindex,nofollow',
+          }
+        }
+
+        return {
+          title: `${opponentCharacter.fullName} | Opponent Bio | Dice Odysseys`,
+          description: opponentCharacter.longDescription,
+          path: `/opponents/${opponentCharacter.slug}`,
+          imagePath: opponentCharacter.thumbnailSrc,
+        }
+      }
+
+      return {
+        title: 'Dice Odysseys | Turn-Based Strategy Dice Game',
+        description:
+          'Dice Odysseys is a turn-based strategy game where you allocate dice to move, claim rewards, and sabotage rivals in solo and online multiplayer matches.',
+        path: '/',
+      }
+    })()
+
+    const canonicalUrl = buildAbsoluteUrl(seo.path)
+    const socialImage = buildAbsoluteImageUrl(seo.imagePath)
+    const robots = seo.robots ?? 'index,follow'
+
+    document.title = seo.title
+
+    upsertMetaTag('name', 'description', seo.description)
+    upsertMetaTag('name', 'robots', robots)
+    upsertCanonicalLink(canonicalUrl)
+
+    upsertMetaTag('property', 'og:type', 'website')
+    upsertMetaTag('property', 'og:site_name', 'Dice Odysseys')
+    upsertMetaTag('property', 'og:title', seo.title)
+    upsertMetaTag('property', 'og:description', seo.description)
+    upsertMetaTag('property', 'og:url', canonicalUrl)
+    upsertMetaTag('property', 'og:image', socialImage)
+
+    upsertMetaTag('name', 'twitter:card', 'summary_large_image')
+    upsertMetaTag('name', 'twitter:title', seo.title)
+    upsertMetaTag('name', 'twitter:description', seo.description)
+    upsertMetaTag('name', 'twitter:image', socialImage)
+
+    upsertJsonLdScript('website', {
+      '@context': 'https://schema.org',
+      '@type': 'WebSite',
+      name: 'Dice Odysseys',
+      url: SITE_ORIGIN,
+      description:
+        'Dice Odysseys is a turn-based strategy game where you allocate dice to move, claim rewards, and sabotage rivals in solo and online multiplayer matches.',
+      publisher: {
+        '@type': 'Organization',
+        name: 'AI Sure Tech',
+        url: 'https://aisuretech.com/',
+      },
+      inLanguage: 'en',
+    })
+
+    upsertJsonLdScript(
+      'videogame',
+      pathname === '/'
+        ? {
+            '@context': 'https://schema.org',
+            '@type': 'VideoGame',
+            name: 'Dice Odysseys',
+            url: SITE_ORIGIN,
+            image: socialImage,
+            description: seo.description,
+            genre: ['Strategy', 'Turn-based Strategy'],
+            gamePlatform: ['Web Browser'],
+            operatingSystem: 'Any',
+            applicationCategory: 'Game',
+            publisher: {
+              '@type': 'Organization',
+              name: 'AI Sure Tech',
+              url: 'https://aisuretech.com/',
+            },
+            inLanguage: 'en',
+          }
+        : null,
+    )
+
+    upsertJsonLdScript(
+      'faqpage',
+      pathname === '/faq'
+        ? {
+            '@context': 'https://schema.org',
+            '@type': 'FAQPage',
+            mainEntity: FAQ_ITEMS.map((item) => ({
+              '@type': 'Question',
+              name: item.question,
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: item.answer,
+              },
+            })),
+          }
+        : null,
+    )
+
+    const breadcrumbEntries: Array<{ name: string; path: string }> = (() => {
+      if (pathname === '/about') {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'About', path: '/about' },
+        ]
+      }
+
+      if (pathname === '/opponents') {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Opponents', path: '/opponents' },
+        ]
+      }
+
+      if (pathname === '/contact') {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Contact', path: '/contact' },
+        ]
+      }
+
+      if (pathname === '/faq') {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'FAQ', path: '/faq' },
+        ]
+      }
+
+      if (pathname === '/legal') {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Legal', path: '/legal' },
+        ]
+      }
+
+      if (opponentBioSlug && opponentCharacter) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Opponents', path: '/opponents' },
+          { name: opponentCharacter.fullName, path: `/opponents/${opponentCharacter.slug}` },
+        ]
+      }
+
+      if (pathname === '/') {
+        return [{ name: 'Home', path: '/' }]
+      }
+
+      return []
+    })()
+
+    upsertJsonLdScript(
+      'breadcrumbs',
+      breadcrumbEntries.length > 0
+        ? {
+            '@context': 'https://schema.org',
+            '@type': 'BreadcrumbList',
+            itemListElement: breadcrumbEntries.map((entry, index) => ({
+              '@type': 'ListItem',
+              position: index + 1,
+              name: entry.name,
+              item: buildAbsoluteUrl(entry.path),
+            })),
+          }
+        : null,
+    )
+  }, [pathname, opponentBioSlug])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
