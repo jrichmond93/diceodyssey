@@ -77,54 +77,56 @@ const socialLinks: SocialLink[] = [
 export function AppFooter() {
   return (
     <footer className="border-t border-slate-800 bg-slate-950/90 px-4 py-3 md:px-6">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
-        <div className="flex flex-wrap items-center justify-between gap-2 2xl:flex-nowrap 2xl:justify-start 2xl:gap-3">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 2xl:flex-nowrap">
-            <span>Dice Odysseys</span>
-            <a
-              href="https://diceodysseys.com"
-              target="_blank"
-              rel="noreferrer"
-              className="text-cyan-300 hover:text-cyan-200"
-            >
-              diceodysseys.com
-            </a>
-            <span className="text-slate-500">•</span>
-            <span>Website by</span>
-            <a
-              href="https://aisuretech.com/"
-              target="_blank"
-              rel="noreferrer"
-              className="text-cyan-300 hover:text-cyan-200"
-            >
-              AI Sure Tech
-            </a>
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5" aria-label="Social media links">
-            {socialLinks.map((social) => (
-              <a
-                key={social.label}
-                href={social.href}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={social.label}
-                title={social.label}
-                className="rounded-md border border-slate-600 bg-slate-900/60 p-2 text-slate-300 transition-colors hover:border-slate-500 hover:text-cyan-200"
-              >
-                {social.icon}
-              </a>
-            ))}
-          </div>
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 xl:flex-row xl:items-center">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 xl:flex-1 xl:flex-nowrap">
+          <a
+            href="https://diceodysseys.com"
+            target="_blank"
+            rel="noreferrer"
+            className="text-cyan-300 hover:text-cyan-200"
+          >
+            DiceOdysseys.com
+          </a>
+          <span className="text-slate-500">•</span>
+          <span>Website by</span>
+          <a
+            href="https://aisuretech.com/"
+            target="_blank"
+            rel="noreferrer"
+            className="text-cyan-300 hover:text-cyan-200"
+          >
+            AI Sure Tech
+          </a>
         </div>
-        <nav aria-label="Site pages" className="flex flex-wrap items-center gap-2 2xl:flex-nowrap 2xl:justify-end">
+
+        <div className="flex items-center justify-center gap-1.5 xl:px-4" aria-label="Social media links">
+          {socialLinks.map((social) => (
+            <a
+              key={social.label}
+              href={social.href}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={social.label}
+              title={social.label}
+              className="rounded-md border border-slate-600 bg-slate-900/60 p-2 text-slate-300 transition-colors hover:border-slate-500 hover:text-cyan-200"
+            >
+              {social.icon}
+            </a>
+          ))}
+        </div>
+
+        <nav aria-label="Site pages" className="flex flex-wrap items-center gap-2 xl:ml-auto xl:flex-nowrap xl:justify-end">
           <NavLink to="/" className={navLinkClass} end>
             Home
           </NavLink>
           <NavLink to="/about" className={navLinkClass}>
             About
           </NavLink>
-          <NavLink to="/opponents" className={navLinkClass}>
-            Opponents
+          <NavLink to="/faq" className={navLinkClass}>
+            FAQ
+          </NavLink>
+          <NavLink to="/legal" className={navLinkClass}>
+            Legal
           </NavLink>
           <NavLink to="/contact" className={navLinkClass}>
             Contact

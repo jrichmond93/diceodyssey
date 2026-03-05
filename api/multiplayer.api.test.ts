@@ -164,10 +164,26 @@ class FakeSupabaseQuery {
         }
 
         if (filter.op === 'gt') {
-          return rowValue !== undefined && rowValue !== null && rowValue > filter.value
+          if (typeof rowValue === 'number' && typeof filter.value === 'number') {
+            return rowValue > filter.value
+          }
+
+          if (typeof rowValue === 'string' && typeof filter.value === 'string') {
+            return rowValue > filter.value
+          }
+
+          return false
         }
 
-        return rowValue !== undefined && rowValue !== null && rowValue <= filter.value
+        if (typeof rowValue === 'number' && typeof filter.value === 'number') {
+          return rowValue <= filter.value
+        }
+
+        if (typeof rowValue === 'string' && typeof filter.value === 'string') {
+          return rowValue <= filter.value
+        }
+
+        return false
       }),
     )
 
@@ -264,7 +280,7 @@ class FakeSupabaseQuery {
   }
 
   then<TResult1 = unknown, TResult2 = never>(
-    onfulfilled?: ((value: { data: DbRow[] | null; error: null }) => TResult1 | PromiseLike<TResult1>) | null,
+    onfulfilled?: ((value: { data: DbRow[] | null; error: DbRow | null }) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ) {
     return Promise.resolve(this.execute()).then(onfulfilled, onrejected)
@@ -343,7 +359,14 @@ interface SnapshotPayload {
       log: unknown[]
       turnResolutionHistory: unknown[]
     }
-    playerSeats: unknown[]
+    playerSeats: Array<{
+      seat: number
+      userId: string
+      displayName: string
+      connected: boolean
+      isAI: boolean
+      avatarKey?: string
+    }>
   }
 }
 
@@ -913,6 +936,10 @@ describe('Phase 3 API lifecycle', () => {
       const ack = result.payload as TurnAckPayload
       expect(ack.accepted).toBe(true)
       expect(ack.snapshot).toBeTruthy()
+
+      if (!ack.snapshot) {
+        throw new Error('Expected turn intent ack snapshot.')
+      }
 
       snapshot = ack.snapshot
       versionHistory.push(snapshot.version)

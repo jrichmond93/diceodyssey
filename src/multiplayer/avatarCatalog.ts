@@ -8,6 +8,12 @@ export const PLAYER_AVATAR_FALLBACK_SRC = '/assets/opponents/placeholder-thumb.s
 
 export const PLAYER_AVATAR_OPTIONS: PlayerAvatarOption[] = [
   { key: 'amaz', label: 'Amaz', src: '/assets/avatar/amaz.png' },
+  { key: 'light', label: 'Light', src: '/assets/avatar/light.png' },
+  { key: 'tina', label: 'Tina', src: '/assets/avatar/tina.png' },
+  { key: 'ica', label: 'Ica', src: '/assets/avatar/ica.png' },
+  { key: 'jas', label: 'Jas', src: '/assets/avatar/jas.png' },
+  { key: 'ata', label: 'Ata', src: '/assets/avatar/ata.png' },
+  { key: 'hect', label: 'Hect', src: '/assets/avatar/hect.png' },
   { key: 'king', label: 'King', src: '/assets/avatar/king.png' },
   { key: 'pen', label: 'Pen', src: '/assets/avatar/pen.png' },
   { key: 'rock', label: 'Rock', src: '/assets/avatar/rock.png' },

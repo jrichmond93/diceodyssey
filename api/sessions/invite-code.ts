@@ -38,6 +38,18 @@ const fallbackCode = (): string => {
   return `${word}${number}`
 }
 
+const getErrorMessage = (value: unknown): string => {
+  if (value instanceof Error) {
+    return value.message
+  }
+
+  if (typeof value === 'string') {
+    return value
+  }
+
+  return 'Unknown error'
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     methodNotAllowed(req, res)
@@ -94,11 +106,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       throw existingInviteError
     }
 
-    if (existingInvite) {
+    const existingInviteCode = existingInvite?.code
+    const existingInviteExpiresAt = existingInvite?.expires_at
+
+    if (typeof existingInviteCode === 'string' && typeof existingInviteExpiresAt === 'string') {
       sendJson(res, 200, {
         sessionId,
-        code: existingInvite.code,
-        expiresAt: existingInvite.expires_at,
+        code: existingInviteCode,
+        expiresAt: existingInviteExpiresAt,
       })
       return
     }
@@ -135,11 +150,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select('code, expires_at')
         .single()
 
-      if (!insertResult.error && insertResult.data) {
+      const insertedInviteCode = insertResult.data?.code
+      const insertedInviteExpiresAt = insertResult.data?.expires_at
+
+      if (!insertResult.error && typeof insertedInviteCode === 'string' && typeof insertedInviteExpiresAt === 'string') {
         sendJson(res, 200, {
           sessionId,
-          code: insertResult.data.code,
-          expiresAt: insertResult.data.expires_at,
+          code: insertedInviteCode,
+          expiresAt: insertedInviteExpiresAt,
         })
         return
       }
@@ -148,8 +166,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     sendJson(res, 500, {
       error: 'INVITE_CODE_GENERATION_FAILED',
     })
-  } catch (error) {
-    if (error instanceof Error && error.message === 'UNAUTHORIZED') {
+  } catch (error: unknown) {
+    const errorMessage = getErrorMessage(error)
+
+    if (errorMessage === 'UNAUTHORIZED') {
       sendJson(res, 401, {
         error: 'UNAUTHORIZED',
       })
@@ -158,7 +178,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     sendJson(res, 500, {
       error: 'INVITE_CODE_REQUEST_FAILED',
-      detail: error instanceof Error ? error.message : 'Unknown error',
+      detail: errorMessage,
     })
   }
 }

@@ -154,7 +154,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const seats: SeatRow[] = [
       {
-        session_id: sessionId,
         seat: 1,
         user_id: user.userId,
         display_name: identity.displayName,
@@ -163,7 +162,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         is_ai: false,
       },
       {
-        session_id: sessionId,
         seat: 2,
         user_id: aiUserId,
         display_name: aiDisplayName,

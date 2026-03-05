@@ -231,6 +231,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const sessionId = seat.session_id as string | undefined
         const seatUserId = seat.user_id as string
         const sessionStatus = sessionId ? sessionStatusById.get(sessionId) : undefined
+        const status: PresenceEntry['status'] =
+          sessionStatus === 'active'
+            ? 'In Match'
+            : sessionStatus === 'lobby'
+              ? 'In Lobby'
+              : 'Available'
 
         return {
           userId: seatUserId,
@@ -238,12 +244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           avatarKey: typeof (seat as Record<string, unknown>).avatar_key === 'string'
             ? ((seat as Record<string, unknown>).avatar_key as string)
             : undefined,
-          status:
-            sessionStatus === 'active'
-              ? 'In Match'
-              : sessionStatus === 'lobby'
-                ? 'In Lobby'
-                : 'Available',
+          status,
           sessionId,
         }
       })

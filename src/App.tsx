@@ -14,6 +14,8 @@ import { TurnControls } from './components/TurnControls'
 import { ResolveDiceAnimation } from './components/ResolveDiceAnimation'
 import { AboutPage } from './pages/AboutPage'
 import { ContactPage } from './pages/ContactPage'
+import { FaqPage } from './pages/FaqPage'
+import { LegalPage } from './pages/LegalPage'
 import { OpponentBioPage } from './pages/OpponentBioPage'
 import { OpponentsPage } from './pages/OpponentsPage'
 import { ProfilePage } from './pages/ProfilePage'
@@ -2027,6 +2029,24 @@ function App() {
     )
   }
 
+  if (pathname === '/faq') {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <FaqPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (pathname === '/legal') {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <LegalPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
   if (opponentBioSlug) {
     return (
       <div className="flex min-h-screen flex-col">
@@ -2058,6 +2078,12 @@ function App() {
             </div>
             <div className="flex items-center gap-2">
               <Link
+                to="/profile"
+                className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
+              >
+                Your Profile
+              </Link>
+              <Link
                 to="/opponents"
                 className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
               >
@@ -2068,12 +2094,6 @@ function App() {
                 className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
               >
                 About
-              </Link>
-              <Link
-                to="/profile"
-                className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
-              >
-                Profile
               </Link>
             </div>
           </div>
@@ -2545,56 +2565,63 @@ function App() {
           </div>
         </header>
 
-        {(onlineStatusMessage || onlineError || onlineSessionId) && (
-          <section className="space-y-1 rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-200">
-            {onlineSessionId && debugEnabled && <p>Online session: {onlineSessionId}</p>}
-            {onlineStatusMessage && (
-              <p
-                className={
-                  isOnlineStatusWarning
-                    ? 'rounded-md border border-amber-400/70 bg-amber-900/30 px-2 py-1 font-semibold text-amber-100'
-                    : 'text-cyan-200'
-                }
-                role="status"
-                aria-live="polite"
-              >
-                {onlineStatusMessage}
-              </p>
+        {(onlineStatusMessage || onlineError || onlineSessionId || (isOnlineMode && onlineSnapshot && !authoritativeState.winnerId)) && (
+          <div className="grid gap-3 xl:grid-cols-2 xl:items-start">
+            {(onlineStatusMessage || onlineError || onlineSessionId) && (
+              <section className="space-y-1 rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-200 xl:h-full">
+                {onlineSessionId && debugEnabled && <p>Online session: {onlineSessionId}</p>}
+                {onlineStatusMessage && (
+                  <p
+                    className={
+                      isOnlineStatusWarning
+                        ? 'rounded-md border border-amber-400/70 bg-amber-900/30 px-2 py-1 font-semibold text-amber-100'
+                        : 'text-cyan-200'
+                    }
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {onlineStatusMessage}
+                  </p>
+                )}
+                {onlineError && <p className="text-rose-300">{onlineError}</p>}
+                {isOnlineMode && !authoritativeState.winnerId && (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      className="rounded-md border border-amber-400 px-3 py-1.5 text-xs font-semibold text-amber-100 disabled:opacity-50"
+                      onClick={handleResign}
+                      disabled={onlineLifecycleSubmitting || onlineSubmitting || !isOnlineActivePlayer}
+                    >
+                      Resign
+                    </button>
+                  </div>
+                )}
+              </section>
             )}
-            {onlineError && <p className="text-rose-300">{onlineError}</p>}
-            {isOnlineMode && !authoritativeState.winnerId && (
-              <div className="pt-1">
-                <button
-                  type="button"
-                  className="rounded-md border border-amber-400 px-3 py-1.5 text-xs font-semibold text-amber-100 disabled:opacity-50"
-                  onClick={handleResign}
-                  disabled={onlineLifecycleSubmitting || onlineSubmitting || !isOnlineActivePlayer}
-                >
-                  Resign
-                </button>
-              </div>
-            )}
-          </section>
-        )}
 
-        {isOnlineMode && onlineSnapshot && !authoritativeState.winnerId && (
-          <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-200">
-            <p className="font-semibold text-cyan-200">Match Seats</p>
-            <ul className="mt-2 space-y-2">
-              {onlineSnapshot.playerSeats.map((seat) => (
-                <li key={`${seat.userId}-${seat.seat}`} className="flex items-center gap-2">
-                  <img
-                    src={getPlayerAvatarSrc(seat.avatarKey)}
-                    alt={`${seat.displayName} avatar`}
-                    className="h-7 w-7 rounded border border-slate-600 object-cover"
-                    onError={withAvatarFallback}
-                  />
-                  <span>{seat.displayName}</span>
-                  <span className="text-xs text-slate-400">— {seat.connected ? 'Connected' : 'Disconnected'}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
+            {isOnlineMode && onlineSnapshot && !authoritativeState.winnerId && (
+              <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-200 xl:h-full">
+                <p className="font-semibold text-cyan-200">Match Seats</p>
+                <ul className="mt-2 flex flex-wrap gap-2">
+                  {onlineSnapshot.playerSeats.map((seat) => (
+                    <li
+                      key={`${seat.userId}-${seat.seat}`}
+                      className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1"
+                    >
+                      <img
+                        src={getPlayerAvatarSrc(seat.avatarKey)}
+                        alt={`${seat.displayName} avatar`}
+                        className="h-7 w-7 rounded border border-slate-600 object-cover"
+                        onError={withAvatarFallback}
+                      />
+                      <span>{seat.displayName}</span>
+                      <span className="text-xs text-slate-400">— {seat.connected ? 'Connected' : 'Disconnected'}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </div>
         )}
 
         {authoritativeState.winnerId && (
