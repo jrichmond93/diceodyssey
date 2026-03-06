@@ -328,7 +328,7 @@ export function AboutPage() {
         <h2 className="text-lg font-semibold text-slate-100">Visual Turn Guide</h2>
         <img
           src="/assets/infographics/turn-flow-infographic.png"
-          alt="Turn flow infographic"
+          alt="Infographic of Dice Odyssey turn flow: Allocate 6 dice, resolve turn, then actions (move, claim, sabotage"
           className="mt-2 w-full rounded border border-slate-700 object-cover"
         />
       </section>

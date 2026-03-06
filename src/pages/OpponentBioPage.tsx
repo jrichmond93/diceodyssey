@@ -101,7 +101,7 @@ export function OpponentBioPage({ slug }: OpponentBioPageProps) {
       <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
         <img
           src={character.bioImageSrc}
-          alt={`${character.fullName} bio`}
+          alt={`Sci-fi headshot of ${character.fullName}, a heroic space captain in Dice Odysseys.`}
           className="w-full rounded-lg border border-slate-700 object-cover"
           onError={(event) => withFallback(event, OPPONENT_BIO_FALLBACK_SRC)}
         />

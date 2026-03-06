@@ -3062,8 +3062,7 @@ function App() {
                 <span>Winner MacGuffins:</span>
                 <img
                   src={MACGUFFIN_TOKEN_ICON}
-                  alt=""
-                  aria-hidden="true"
+                  alt="Glowing emerald MacGuffin token, a crystalline artifact with energy core from Dice Odysseys"
                   className="h-4 w-4 rounded object-cover"
                 />
                 <span className="font-semibold">{winnerPlayer.macGuffins}</span>
