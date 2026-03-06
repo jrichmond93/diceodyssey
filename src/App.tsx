@@ -2434,7 +2434,7 @@ function App() {
           <section className="rounded-xl border border-cyan-500/50 bg-cyan-950/20 p-4">
             <div className="flex flex-wrap items-baseline gap-2">
               <h2 className="text-lg font-semibold text-cyan-100">Choose your next mission</h2>
-              <p className="text-sm text-cyan-50/90">Pick one mode, configure it, and start playing...</p>
+              <p className="text-sm text-cyan-50/90">Pick your mode, configure, and start playing...</p>
             </div>
 
             <div className="mt-3 grid gap-2 md:grid-cols-3">

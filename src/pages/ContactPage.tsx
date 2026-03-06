@@ -5,9 +5,18 @@ export function ContactPage() {
     <main className="mx-auto w-full max-w-4xl space-y-4 p-4 md:p-6">
       <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-cyan-200">Contact</h1>
-            <p className="text-sm text-slate-300">We would love to hear from you.</p>
+          <div className="flex items-center gap-3">
+            <Link to="/" aria-label="Go to Home" className="shrink-0">
+              <img
+                src="/assets/branding/dice-odyssey-logo.png"
+                alt="Dice Odysseys logo"
+                className="h-12 w-12 rounded-md border border-slate-700 object-cover"
+              />
+            </Link>
+            <div>
+              <h1 className="text-2xl font-bold text-cyan-200">Contact</h1>
+              <p className="text-sm text-slate-300">We would love to hear from you.</p>
+            </div>
           </div>
           <Link
             to="/"

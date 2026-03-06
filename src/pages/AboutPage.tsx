@@ -214,11 +214,13 @@ export function AboutPage() {
       <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
-            <img
-              src="/assets/branding/dice-odyssey-logo.png"
-              alt="Dice Odysseys logo"
-              className="h-14 w-14 rounded-md border border-slate-700 object-cover"
-            />
+            <Link to="/" aria-label="Go to Home" className="shrink-0">
+              <img
+                src="/assets/branding/dice-odyssey-logo.png"
+                alt="Dice Odysseys logo"
+                className="h-14 w-14 rounded-md border border-slate-700 object-cover"
+              />
+            </Link>
             <div>
               <h1 className="text-2xl font-bold text-cyan-200">About Dice Odysseys</h1>
               <p className="text-sm text-slate-300">How to play, what to expect, and who we are.</p>
