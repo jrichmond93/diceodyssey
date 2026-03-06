@@ -18,6 +18,14 @@ export function ContactPage() {
         </div>
       </section>
 
+      <section className="overflow-hidden rounded-xl border border-slate-700 bg-slate-950/70">
+        <img
+          src="/assets/branding/contact.png"
+          alt="Contact hero banner"
+          className="max-h-56 w-full object-cover"
+        />
+      </section>
+
       <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4 text-sm text-slate-300">
         <h2 className="text-lg font-semibold text-slate-100">Welcome and Comments</h2>
         <p className="mt-2 leading-relaxed">

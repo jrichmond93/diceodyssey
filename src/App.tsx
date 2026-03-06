@@ -131,6 +131,21 @@ const humanWinConfetti = [
   { left: 93, delay: 240, duration: 1960, colorClass: 'text-cyan-200' },
 ]
 
+const homeTestimonials = [
+  {
+    quote: 'Fast turns, meaningful choices, and just enough chaos to stay exciting.',
+    author: 'William H.',
+  },
+  {
+    quote: 'The mix of movement, claims, and sabotage makes every match feel different.',
+    author: 'Alexa R.',
+  },
+  {
+    quote: 'Easy to learn, hard to master. Great for quick solo sessions and rematches.',
+    author: 'Beany S.',
+  },
+]
+
 type ResolveAnimationVariant = 'rolling' | 'skip'
 type HomeStartMode = 'INSTANT' | 'HOTSEAT' | 'ONLINE'
 type OnlineWaitState = 'IDLE' | 'WAITING_PRIMARY' | 'WAITING_DECISION'
@@ -313,6 +328,7 @@ function App() {
   const [onlineSnapshot, setOnlineSnapshot] = useState<SessionSnapshot | null>(null)
   const [onlineStatusMessage, setOnlineStatusMessage] = useState<string | null>(null)
   const [onlineError, setOnlineError] = useState<string | null>(null)
+  const [homeModeHint, setHomeModeHint] = useState<string | null>(null)
   const [matchStartState, setMatchStartState] = useState<MatchStartState>('IDLE')
   const [quickOnlineFlowActive, setQuickOnlineFlowActive] = useState(false)
   const [onlineWaitState, setOnlineWaitState] = useState<OnlineWaitState>('IDLE')
@@ -1253,6 +1269,15 @@ function App() {
     [authoritativeState.players],
   )
 
+  const featuredHomeOpponent = useMemo(() => {
+    if (AI_CHARACTERS.length === 0) {
+      return undefined
+    }
+
+    const randomIndex = Math.floor(Math.random() * AI_CHARACTERS.length)
+    return AI_CHARACTERS[randomIndex]
+  }, [])
+
   const turnResolutionRoundRecap = useMemo(() => {
     if (authoritativeState.turnResolutionHistory.length === 0) {
       return undefined
@@ -1595,8 +1620,14 @@ function App() {
   const handleSelectHomeStartMode = useCallback(
     (nextMode: HomeStartMode) => {
       if (nextMode === 'ONLINE' && !multiplayerEligibility.eligible) {
-        setOnlineError('Log in on Profile to use Online Match.')
+        setHomeModeHint('Log in to play Online Match against other users.')
         return
+      }
+
+      setHomeModeHint(null)
+
+      if (nextMode !== 'ONLINE') {
+        clearOnlineContextForOfflineStart()
       }
 
       setHomeStartMode(nextMode)
@@ -1623,7 +1654,7 @@ function App() {
       setMatchStartStateTracked('IDLE')
       setOnlineStatusMessage('Choose from waiting humans or AI opponents, then start matchmaking.')
     },
-    [multiplayerEligibility.eligible, setMatchStartStateTracked],
+    [clearOnlineContextForOfflineStart, multiplayerEligibility.eligible, setMatchStartStateTracked],
   )
 
   const handleKeepWaitingQuickOnline = useCallback(() => {
@@ -2352,7 +2383,7 @@ function App() {
   if (!authoritativeState.started) {
     return (
       <div className="flex min-h-screen flex-col">
-        <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center p-6">
+        <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center p-6">
           <div className="rounded-2xl border border-slate-700 bg-slate-950/80 p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -2370,7 +2401,7 @@ function App() {
                 to="/profile"
                 className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
               >
-                Your Profile
+                {isAuthenticated ? 'Your Profile' : 'Log In'}
               </Link>
               <Link
                 to="/opponents"
@@ -2387,7 +2418,9 @@ function App() {
             </div>
           </div>
 
-          <div className="relative mt-4">
+          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+            <div className="space-y-4">
+          <div className="relative">
             <img
               src="/assets/branding/hero-banner.png"
               alt="Dice Odysseys hero banner"
@@ -2398,9 +2431,11 @@ function App() {
             </p>
           </div>
 
-          <section className="mt-6 rounded-xl border border-cyan-500/50 bg-cyan-950/20 p-4">
-            <h2 className="text-lg font-semibold text-cyan-100">Choose your next mission</h2>
-            <p className="mt-1 text-sm text-cyan-50/90">Pick one mode, configure it, and start.</p>
+          <section className="rounded-xl border border-cyan-500/50 bg-cyan-950/20 p-4">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <h2 className="text-lg font-semibold text-cyan-100">Choose your next mission</h2>
+              <p className="text-sm text-cyan-50/90">Pick one mode, configure it, and start playing...</p>
+            </div>
 
             <div className="mt-3 grid gap-2 md:grid-cols-3">
               <button
@@ -2444,12 +2479,16 @@ function App() {
             </div>
 
             {!multiplayerEligibility.eligible && (
-              <p className="mt-2 text-xs text-slate-300">Log in on Profile to enable Online Match.</p>
+              <p className="mt-2 text-xs text-slate-300">Log in to enable Online Match. (It's Free!)</p>
+            )}
+            {homeModeHint && (
+              <p className="mt-2 rounded-md border border-amber-400/50 bg-amber-950/30 px-2 py-1.5 text-xs text-amber-100">
+                {homeModeHint}
+              </p>
             )}
           </section>
-
           {homeStartMode === 'INSTANT' && (
-            <section className="mt-6 grid gap-3 lg:grid-cols-4">
+            <section className="grid gap-3 lg:grid-cols-4">
               <label className="flex flex-col gap-1 text-sm text-slate-200">
                 AI Difficulty
                 <select
@@ -2487,7 +2526,7 @@ function App() {
           )}
 
           {homeStartMode === 'HOTSEAT' && (
-            <section className="mt-6 grid gap-3 lg:grid-cols-4">
+            <section className="grid gap-3 lg:grid-cols-4">
               <label className="flex flex-col gap-1 text-sm text-slate-200">
                 Players
                 <select
@@ -2514,7 +2553,7 @@ function App() {
           )}
 
           {homeStartMode === 'ONLINE' && (
-            <section className="mt-6 space-y-3 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-200">
+            <section className="space-y-3 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-200">
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2 rounded border border-slate-700 bg-slate-950/40 p-2">
                   <p className="font-semibold text-cyan-200">Waiting humans</p>
@@ -2701,30 +2740,6 @@ function App() {
           )}
 
 
-          <div className="mt-6 grid gap-3 md:grid-cols-3">
-            <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-              <h2 className="text-sm font-semibold text-cyan-200">What</h2>
-              <p className="mt-1 text-xs text-slate-300">
-                Dice Odysseys is a turn-based space race. Move across planets, claim MacGuffins,
-                and disrupt rivals before the galaxy collapses.
-              </p>
-            </article>
-            <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-              <h2 className="text-sm font-semibold text-cyan-200">How</h2>
-              <p className="mt-1 text-xs text-slate-300">
-                Assign all dice to Move, Claim, or Sabotage. Any color can go anywhere.
-                Matching color to slot gets +1 roll value; off-color gets -1.
-              </p>
-            </article>
-            <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-              <h2 className="text-sm font-semibold text-cyan-200">Win</h2>
-              <p className="mt-1 text-xs text-slate-300">
-                Reach 7 MacGuffins first for race victory. If the galaxy runs out, survival winner
-                is highest MacGuffins.
-              </p>
-            </article>
-          </div>
-
           {homeStartMode === 'ONLINE' && mode === 'multiplayer' && SHOW_DEBUG_CONTROLS && (
             <section className="mt-4 space-y-2 rounded-md border border-slate-700 bg-slate-900/50 p-3 text-xs text-slate-300">
               <p className="font-semibold text-slate-200">Temporary Debug (remove later)</p>
@@ -2759,6 +2774,70 @@ function App() {
               </div>
             </section>
           )}
+            </div>
+
+            <aside className="grid gap-3 xl:content-start">
+              <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+                <h2 className="text-sm font-semibold text-cyan-200">What</h2>
+                <p className="mt-1 text-xs text-slate-300">
+                  Dice Odysseys is a turn-based space race. Move across planets, claim MacGuffins,
+                  and disrupt rivals before the galaxy collapses.
+                </p>
+              </article>
+              <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+                <h2 className="text-sm font-semibold text-cyan-200">How</h2>
+                <p className="mt-1 text-xs text-slate-300">
+                  Assign all dice to Move, Claim, or Sabotage. Any color can go anywhere.
+                  Matching color to slot gets +1 roll value; off-color gets -1.
+                </p>
+              </article>
+              <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+                <h2 className="text-sm font-semibold text-cyan-200">Win</h2>
+                <p className="mt-1 text-xs text-slate-300">
+                  Reach 7 MacGuffins first for race victory. If the galaxy runs out, survival winner
+                  is highest MacGuffins.
+                </p>
+              </article>
+
+              {featuredHomeOpponent && (
+                <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+                  <h2 className="text-sm font-semibold text-cyan-200">Featured Opponent</h2>
+                  <div className="mt-2 flex items-center gap-2">
+                    <img
+                      src={featuredHomeOpponent.thumbnailSrc}
+                      alt={`${featuredHomeOpponent.fullName} thumbnail`}
+                      className="h-14 w-14 rounded border border-slate-600 object-cover"
+                      onError={withOpponentThumbnailFallback}
+                    />
+                    <div className="flex min-w-0 flex-1 items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-slate-100">{featuredHomeOpponent.fullName}</p>
+                        <p className="text-[11px] text-slate-400">{featuredHomeOpponent.phraseDescription}</p>
+                      </div>
+                      <Link
+                        to={`/opponents/${featuredHomeOpponent.slug}`}
+                        className="inline-flex shrink-0 rounded border border-slate-600 px-2 py-1 text-[11px] font-semibold text-cyan-200 hover:border-slate-500"
+                      >
+                        Full bio
+                      </Link>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-300">{featuredHomeOpponent.longDescription}</p>
+                </article>
+              )}
+
+              <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+                <ul className="space-y-2">
+                  {homeTestimonials.map((item) => (
+                    <li key={item.author} className="rounded border border-slate-700 bg-slate-950/40 p-2">
+                      <p className="text-xs text-cyan-200">“{item.quote}”</p>
+                      <p className="mt-1 text-[11px] font-semibold text-cyan-200">— {item.author}</p>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            </aside>
+          </div>
           </div>
         </div>
         <AppFooter />

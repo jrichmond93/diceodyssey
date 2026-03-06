@@ -20,6 +20,14 @@ export function LegalPage() {
         </div>
       </section>
 
+      <section className="overflow-hidden rounded-xl border border-slate-700 bg-slate-950/70">
+        <img
+          src="/assets/branding/legal.png"
+          alt="Legal hero banner"
+          className="max-h-56 w-full object-cover"
+        />
+      </section>
+
       <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
         <h2 className="text-lg font-semibold text-slate-100">Privacy Policy</h2>
         <p className="mt-2 text-sm text-slate-300">

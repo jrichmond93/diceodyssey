@@ -71,6 +71,14 @@ export function FaqPage() {
         </div>
       </section>
 
+      <section className="overflow-hidden rounded-xl border border-slate-700 bg-slate-950/70">
+        <img
+          src="/assets/branding/faq.png"
+          alt="FAQ hero banner"
+          className="max-h-56 w-full object-cover"
+        />
+      </section>
+
       <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {FAQ_ITEMS.map((item) => (
           <article key={item.question} className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">

@@ -74,14 +74,14 @@ export function PlayerStatus({
                 <img
                   src={aiCharacter?.thumbnailSrc ?? OPPONENT_THUMBNAIL_FALLBACK_SRC}
                   alt={`${player.name} portrait`}
-                  className="h-7 w-7 rounded border border-slate-400/90 object-cover"
+                  className="h-12 w-12 rounded border border-slate-400/90 object-cover"
                   onError={(event) => withImageFallback(event, OPPONENT_THUMBNAIL_FALLBACK_SRC)}
                 />
               ) : (
                 <img
                   src={getPlayerAvatarSrc(humanAvatarKey)}
                   alt={`${player.name} avatar`}
-                  className="h-7 w-7 rounded border border-slate-400/90 object-cover"
+                  className="h-12 w-12 rounded border border-slate-400/90 object-cover"
                   onError={(event) => withImageFallback(event, PLAYER_AVATAR_FALLBACK_SRC)}
                 />
               )}
@@ -98,8 +98,16 @@ export function PlayerStatus({
                 />
                 <span>{player.macGuffins}</span>
               </p>
-              <p>Skips: {player.skippedTurns}</p>
-              <p>Defense: {player.defense}</p>
+              <p className="flex items-center gap-3">
+                <span>
+                  <span className="text-slate-300">Skips:</span>{' '}
+                  <span className="font-semibold text-amber-200">{player.skippedTurns}</span>
+                </span>
+                <span>
+                  <span className="text-slate-300">Defense:</span>{' '}
+                  <span className="font-semibold text-emerald-200">{player.defense}</span>
+                </span>
+              </p>
             </div>
           </div>
           )
