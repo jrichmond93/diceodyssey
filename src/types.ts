@@ -45,6 +45,7 @@ export interface Player {
   isAI: boolean
   aiCharacterSlug?: string
   shipPos: number
+  moveDirection: 'forward' | 'backward'
   macGuffins: number
   skippedTurns: number
   skipImmunity: boolean

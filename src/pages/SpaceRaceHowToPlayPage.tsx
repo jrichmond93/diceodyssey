@@ -144,7 +144,7 @@ export function SpaceRaceHowToPlayPage() {
               />
               <div>
                 <h3 className="text-sm font-semibold text-blue-300">Move</h3>
-                <p className="mt-1 text-sm text-slate-300">Advance by your move roll total (capped at galaxy end). If you start on the last claimed planet, move goes backward.</p>
+                <p className="mt-1 text-sm text-slate-300">Advance by your move roll total (capped at galaxy end). If you start on the last planet, move goes backward.</p>
               </div>
             </div>
           </article>

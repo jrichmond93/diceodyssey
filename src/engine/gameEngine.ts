@@ -450,12 +450,21 @@ export const resolveCurrentPlayerTurn = (state: GameState, deps: EngineDependenc
   const sabotageTotal = sabotageRolls.reduce((sum, roll) => sum + roll.final, 0)
 
   const maxPosition = state.galaxy.length
-  const lastPlanet = maxPosition > 0 ? state.galaxy[maxPosition - 1] : undefined
-  const shouldMoveBackward =
-    maxPosition > 0 && currentPlayer.shipPos === maxPosition && Boolean(lastPlanet?.claimed)
-  const movedTo = shouldMoveBackward
-    ? Math.max(0, currentPlayer.shipPos - moveTotal)
-    : Math.min(maxPosition, currentPlayer.shipPos + moveTotal)
+  const persistedDirection = currentPlayer.moveDirection ?? 'forward'
+  const effectiveDirection: 'forward' | 'backward' =
+    currentPlayer.shipPos >= maxPosition
+      ? 'backward'
+      : currentPlayer.shipPos <= 0
+        ? 'forward'
+        : persistedDirection
+
+  const movedTo =
+    effectiveDirection === 'backward'
+      ? Math.max(0, currentPlayer.shipPos - moveTotal)
+      : Math.min(maxPosition, currentPlayer.shipPos + moveTotal)
+
+  const nextMoveDirection: 'forward' | 'backward' =
+    movedTo >= maxPosition ? 'backward' : movedTo <= 0 ? 'forward' : effectiveDirection
 
   const landedPlanetIndex = movedTo - 1
   const nextGalaxy = [...state.galaxy]
@@ -502,6 +511,7 @@ export const resolveCurrentPlayerTurn = (state: GameState, deps: EngineDependenc
       ? {
           ...player,
           shipPos: movedTo,
+          moveDirection: nextMoveDirection,
           macGuffins: player.macGuffins + gainedMacGuffins,
           skipImmunity: false,
           allocation: normalizedAllocation,

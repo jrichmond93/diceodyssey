@@ -265,7 +265,9 @@ export function TurnResolution({ summary, humanSummary, resolving, playbackStage
                     : summary.rolls.claim.length > 0
                       ? `No gain on P${summary.claim.landedPlanetId}`
                       : `No claim roll on P${summary.claim.landedPlanetId}`
-                  : 'No landed planet'
+                  : summary.skipped
+                    ? 'No claim (turn skipped)'
+                    : 'No landed planet'
 
                 const sabotageMessage = sabotageApplied > 0
                   ? `${summary.skips.appliedToTarget?.targetName ?? 'Rival'} +${sabotageApplied} skip`
@@ -284,7 +286,9 @@ export function TurnResolution({ summary, humanSummary, resolving, playbackStage
                         ? `Forward ${movedBy} space${movedBy === 1 ? '' : 's'} (${summary.position.before} → ${summary.position.after})`
                         : moveDelta < 0
                           ? `Backward ${movedBy} space${movedBy === 1 ? '' : 's'} (${summary.position.before} → ${summary.position.after})`
-                          : `No movement (${summary.position.before} → ${summary.position.after})`,
+                          : summary.totals.move > 0
+                            ? `Edge-capped (${summary.position.before} → ${summary.position.after})`
+                            : `No movement (${summary.position.before} → ${summary.position.after})`,
                   },
                   {
                     label: 'Claim',

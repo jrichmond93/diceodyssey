@@ -13,6 +13,7 @@ const createPlayer = (overrides: Partial<Player> & Pick<Player, 'id' | 'name' | 
   isAI: overrides.isAI,
   aiCharacterSlug: overrides.aiCharacterSlug,
   shipPos: overrides.shipPos ?? 0,
+  moveDirection: overrides.moveDirection ?? 'forward',
   macGuffins: overrides.macGuffins ?? 0,
   skippedTurns: overrides.skippedTurns ?? 0,
   skipImmunity: overrides.skipImmunity ?? false,
@@ -155,6 +156,110 @@ describe('resolveCurrentPlayerTurn', () => {
     expect(next.latestTurnResolution?.skipped).toBe(true)
     expect(next.latestTurnResolution?.totals.move).toBe(0)
     expect(next.debugLog).toHaveLength(1)
+  })
+
+  it('moves backward when starting turn at galaxy end even if final planet is unclaimed', () => {
+    const current = createPlayer({
+      id: 'human',
+      name: 'Human',
+      isAI: false,
+      shipPos: 4,
+      allocation: {
+        move: ['human-die-2', 'human-die-3'],
+        claim: ['human-die-4', 'human-die-5'],
+        sabotage: ['human-die-0', 'human-die-1'],
+      },
+    })
+
+    const rival = createPlayer({
+      id: 'ai-1',
+      name: 'AI 1',
+      isAI: true,
+      shipPos: 2,
+    })
+
+    const state = createState({
+      players: [current, rival],
+      currentPlayerIndex: 0,
+      turn: 7,
+      galaxy: [createPlanet(1, 3, false), createPlanet(2, 4, false), createPlanet(3, 5, false), createPlanet(4, 6, false)],
+      debugEnabled: true,
+    })
+
+    const next = resolveCurrentPlayerTurn(state, createDeterministicDeps([4, 5, 2, 3, 1, 1]))
+
+    expect(next.players[0].shipPos).toBe(0)
+    expect(next.latestTurnResolution?.position.before).toBe(4)
+    expect(next.latestTurnResolution?.position.after).toBe(0)
+    expect(next.latestTurnResolution?.totals.move).toBe(11)
+    expect(next.players[0].moveDirection).toBe('forward')
+  })
+
+  it('continues backward after end, then switches to forward after reaching start', () => {
+    const player = createPlayer({
+      id: 'human',
+      name: 'Human',
+      isAI: false,
+      shipPos: 4,
+      moveDirection: 'forward',
+      allocation: {
+        move: ['human-die-2', 'human-die-0'],
+        claim: ['human-die-4', 'human-die-5'],
+        sabotage: ['human-die-1', 'human-die-3'],
+      },
+    })
+
+    const initial = createState({
+      players: [player],
+      currentPlayerIndex: 0,
+      turn: 1,
+      galaxy: [createPlanet(1, 3, false), createPlanet(2, 4, false), createPlanet(3, 5, false), createPlanet(4, 6, false)],
+      debugEnabled: true,
+    })
+
+    const first = resolveCurrentPlayerTurn(initial, createDeterministicDeps([1, 1, 1, 1, 1, 1]))
+    expect(first.players[0].shipPos).toBe(1)
+    expect(first.players[0].moveDirection).toBe('backward')
+
+    const second = resolveCurrentPlayerTurn(
+      {
+        ...first,
+        players: [
+          {
+            ...first.players[0],
+            allocation: {
+              move: ['human-die-2', 'human-die-0'],
+              claim: ['human-die-4', 'human-die-5'],
+              sabotage: ['human-die-1', 'human-die-3'],
+            },
+          },
+        ],
+      },
+      createDeterministicDeps([1, 1, 1, 1, 1, 1]),
+    )
+
+    expect(second.players[0].shipPos).toBe(0)
+    expect(second.players[0].moveDirection).toBe('forward')
+
+    const third = resolveCurrentPlayerTurn(
+      {
+        ...second,
+        players: [
+          {
+            ...second.players[0],
+            allocation: {
+              move: ['human-die-2', 'human-die-0'],
+              claim: ['human-die-4', 'human-die-5'],
+              sabotage: ['human-die-1', 'human-die-3'],
+            },
+          },
+        ],
+      },
+      createDeterministicDeps([1, 1, 1, 1, 1, 1]),
+    )
+
+    expect(third.players[0].shipPos).toBe(3)
+    expect(third.players[0].moveDirection).toBe('forward')
   })
 
   it('applies deterministic galaxy shrink on shrink interval turns', () => {

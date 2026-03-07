@@ -20,6 +20,7 @@ const createPlayer = (overrides: Partial<Player> & Pick<Player, 'id' | 'name' | 
   isAI: overrides.isAI,
   aiCharacterSlug: overrides.aiCharacterSlug,
   shipPos: overrides.shipPos ?? 0,
+  moveDirection: overrides.moveDirection ?? 'forward',
   macGuffins: overrides.macGuffins ?? 0,
   skippedTurns: overrides.skippedTurns ?? 0,
   skipImmunity: overrides.skipImmunity ?? false,

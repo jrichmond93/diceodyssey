@@ -63,6 +63,7 @@ const makePlayer = (id: string, name: string, isAI: boolean, aiCharacterSlug?: s
   isAI,
   aiCharacterSlug,
   shipPos: 0,
+  moveDirection: 'forward',
   macGuffins: 0,
   skippedTurns: 0,
   skipImmunity: false,
