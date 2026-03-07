@@ -122,6 +122,9 @@ export function AppFooter() {
           <NavLink to="/about" className={navLinkClass}>
             About
           </NavLink>
+          <NavLink to="/games/space-race/how-to-play" className={navLinkClass}>
+            How to Play
+          </NavLink>
           <NavLink to="/faq" className={navLinkClass}>
             FAQ
           </NavLink>

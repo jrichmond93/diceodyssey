@@ -2,16 +2,9 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Syn
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 import { TouchBackend } from 'react-dnd-touch-backend'
-import { Link, Navigate, useLocation } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth0 } from '@auth0/auth0-react'
 import { AppFooter } from './components/AppFooter'
-import { DicePool } from './components/DicePool'
-import { GalaxyBoard } from './components/GalaxyBoard'
-import { PlayerStatus } from './components/PlayerStatus'
-import { TurnResolution } from './components/TurnResolution'
-import { TurnLog } from './components/TurnLog'
-import { TurnControls } from './components/TurnControls'
-import { ResolveDiceAnimation } from './components/ResolveDiceAnimation'
 import { AboutPage } from './pages/AboutPage'
 import { ContactPage } from './pages/ContactPage'
 import { FAQ_ITEMS, FaqPage } from './pages/FaqPage'
@@ -19,11 +12,15 @@ import { LegalPage } from './pages/LegalPage'
 import { OpponentBioPage } from './pages/OpponentBioPage'
 import { OpponentsPage } from './pages/OpponentsPage'
 import { ProfilePage } from './pages/ProfilePage'
+import { SpaceRacePage } from './pages/SpaceRacePage'
+import { SpaceRaceHowToPlayPage } from './pages/SpaceRaceHowToPlayPage'
 import { emptyAllocation, gameReducer, initialGameState } from './reducers/gameReducer'
 import type { Allocation, Difficulty, GameMode, GameState, TurnResolutionPlaybackStage } from './types'
 import { AI_CHARACTERS, findAICharacterBySlug, OPPONENT_THUMBNAIL_FALLBACK_SRC } from './data/aiCharacters'
+import { findGameBySlug, GAME_CATALOG, SPACE_RACE_GAME } from './data/games'
 import { buildPostGameNarrative } from './utils/buildPostGameNarrative'
 import { preloadDiceAnimationAssets } from './utils/dieAssets'
+import { loadHomeLaunchState, saveHomeLaunchState } from './utils/homeLaunchState'
 import {
   getMultiplayerEligibility,
   mapAuthUserToMultiplayerIdentity,
@@ -39,14 +36,11 @@ import { createSessionRealtimeController, type SessionRealtimeController } from 
 import type { RealtimeEvent, SessionLifecycleAck, SessionSnapshot, TurnAck } from './multiplayer/types'
 
 const HELP_STORAGE_KEY = 'dice-odysseys-help-open'
-const HOME_MODE_STORAGE_KEY = 'dice-odysseys-home-mode'
 const AI_THINK_DELAY_MS = 600
 const RESOLVE_STAGE_DELAY_MS = 240
 const REDUCED_MOTION_STAGE_DELAY_MS = 80
 const REDUCED_MOTION_AI_DELAY_MS = 200
 const RESOLVE_ANIMATION_MS = 2000
-const MACGUFFIN_TOKEN_ICON = '/assets/ui/icon-macguffin-token.png'
-
 const HUMAN_WIN_CELEBRATION_MS = 4200
 const HUMAN_WIN_REDUCED_MOTION_MS = 2400
 const HUMAN_WIN_SCROLL_LEAD_MS = 260
@@ -249,6 +243,17 @@ const getOpponentBioSlug = (pathname: string): string | undefined => {
   return slug.length > 0 ? slug : undefined
 }
 
+const getGameSlugFromPath = (pathname: string): string | undefined => {
+  const prefix = '/games/'
+
+  if (!pathname.startsWith(prefix)) {
+    return undefined
+  }
+
+  const slug = pathname.slice(prefix.length)
+  return slug.length > 0 ? slug : undefined
+}
+
 const isGameStateLike = (value: unknown): value is GameState => {
   if (!value || typeof value !== 'object') {
     return false
@@ -264,19 +269,6 @@ const isGameStateLike = (value: unknown): value is GameState => {
     Boolean(candidate.turnResolution) &&
     typeof candidate.turnResolution?.active === 'boolean'
   )
-}
-
-const getStoredHomeMode = (): GameMode => {
-  if (typeof window === 'undefined') {
-    return 'single'
-  }
-
-  const stored = window.localStorage.getItem(HOME_MODE_STORAGE_KEY)
-  if (stored === 'single' || stored === 'hotseat' || stored === 'multiplayer') {
-    return stored
-  }
-
-  return 'single'
 }
 
 const buildDefaultHotseatNames = (count: number): string =>
@@ -301,17 +293,22 @@ function App() {
     user,
     getAccessTokenSilently,
   } = useAuth0()
+  const navigate = useNavigate()
   const location = useLocation()
   const pathname = getNormalizedPathname(location.pathname)
+  const isSpaceRaceHowToPlayPath = pathname === `/games/${SPACE_RACE_GAME.slug}/how-to-play`
   const opponentBioSlug = getOpponentBioSlug(pathname)
+  const gameSlugFromPath = getGameSlugFromPath(pathname)
+  const persistedLauncherState = useMemo(() => loadHomeLaunchState(), [])
   const [state, dispatch] = useReducer(gameReducer, initialGameState)
-  const [mode, setMode] = useState<GameMode>(() => getStoredHomeMode())
-  const [homeStartMode, setHomeStartMode] = useState<HomeStartMode>('INSTANT')
-  const [difficulty, setDifficulty] = useState<Difficulty>('medium')
-  const [humanName, setHumanName] = useState('Captain')
-  const [aiCount, setAiCount] = useState(1)
-  const [hotseatCount, setHotseatCount] = useState(2)
-  const [hotseatNames, setHotseatNames] = useState(buildDefaultHotseatNames(2))
+  const [selectedGameSlug, setSelectedGameSlug] = useState<string>(persistedLauncherState.selectedGameSlug)
+  const [mode, setMode] = useState<GameMode>(persistedLauncherState.mode)
+  const [homeStartMode, setHomeStartMode] = useState<HomeStartMode>(persistedLauncherState.homeStartMode)
+  const [difficulty, setDifficulty] = useState<Difficulty>(persistedLauncherState.difficulty)
+  const [humanName, setHumanName] = useState(persistedLauncherState.humanName)
+  const [aiCount, setAiCount] = useState(persistedLauncherState.aiCount)
+  const [hotseatCount, setHotseatCount] = useState(persistedLauncherState.hotseatCount)
+  const [hotseatNames, setHotseatNames] = useState(persistedLauncherState.hotseatNames)
   const [debugEnabled, setDebugEnabled] = useState(false)
   const [animationEnabled, setAnimationEnabled] = useState(true)
   const [draftAllocation, setDraftAllocation] = useState<Allocation>(emptyAllocation())
@@ -370,6 +367,7 @@ function App() {
   const onlineSessionGuardRef = useRef<string | null>(null)
   const onlineLobbyBootstrappingRef = useRef(false)
   const matchStartStateRef = useRef<MatchStartState>('IDLE')
+  const hotseatCountInitializedRef = useRef(false)
   const [helpOpen, setHelpOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
       return false
@@ -380,6 +378,9 @@ function App() {
 
   const authoritativeState =
     onlineSnapshot && isGameStateLike(onlineSnapshot.gameState) ? onlineSnapshot.gameState : state
+  const selectedGame = findGameBySlug(selectedGameSlug) ?? SPACE_RACE_GAME
+  const routedGame = gameSlugFromPath ? findGameBySlug(gameSlugFromPath) : undefined
+  const isSpaceRaceRoute = gameSlugFromPath === SPACE_RACE_GAME.slug
   const isOnlineMode = Boolean(onlineSessionId)
   const currentPlayer = authoritativeState.players[authoritativeState.currentPlayerIndex]
   const resolveStageDelay = prefersReducedMotion ? REDUCED_MOTION_STAGE_DELAY_MS : RESOLVE_STAGE_DELAY_MS
@@ -442,14 +443,25 @@ function App() {
 
   useEffect(() => {
     const opponentCharacter = opponentBioSlug ? findAICharacterBySlug(opponentBioSlug) : undefined
+    const gameSlug = getGameSlugFromPath(pathname)
+    const game = gameSlug ? findGameBySlug(gameSlug) : undefined
 
     const seo: SeoMeta = (() => {
       if (pathname === '/about') {
         return {
-          title: 'About Dice Odysseys | Rules, Strategy, and Game Overview',
+          title: 'About Dice Odysseys | Company and Platform Overview',
           description:
-            'Learn how Dice Odysseys works, explore core mechanics, and discover strategy tips for move, claim, and sabotage gameplay.',
+            'Learn about Dice Odysseys, the team behind it, and the multi-game platform roadmap.',
           path: '/about',
+        }
+      }
+
+      if (isSpaceRaceHowToPlayPath) {
+        return {
+          title: 'How to Play Space Race | Dice Odysseys',
+          description:
+            'Learn Space Race rules, turn flow, actions, scoring, and strategy basics with the complete How to Play guide.',
+          path: `/games/${SPACE_RACE_GAME.slug}/how-to-play`,
         }
       }
 
@@ -494,6 +506,33 @@ function App() {
           title: 'Profile | Dice Odysseys',
           description: 'Manage your Dice Odysseys player profile settings and preferences.',
           path: '/profile',
+          robots: 'noindex,nofollow',
+        }
+      }
+
+      if (gameSlug === SPACE_RACE_GAME.slug) {
+        return {
+          title: 'Space Race | Dice Odysseys',
+          description:
+            'Play Space Race, the current Dice Odysseys game mode: allocate dice to move, claim, and sabotage in solo and online matches.',
+          path: `/games/${SPACE_RACE_GAME.slug}`,
+        }
+      }
+
+      if (gameSlug && !game) {
+        return {
+          title: 'Game Not Found | Dice Odysseys',
+          description: 'The requested game could not be found in Dice Odysseys.',
+          path: '/',
+          robots: 'noindex,nofollow',
+        }
+      }
+
+      if (gameSlug && game?.status === 'coming-soon') {
+        return {
+          title: `${game.name} (Coming Soon) | Dice Odysseys`,
+          description: `${game.name} is an upcoming game in Dice Odysseys.`,
+          path: `/games/${game.slug}`,
           robots: 'noindex,nofollow',
         }
       }
@@ -563,11 +602,11 @@ function App() {
 
     upsertJsonLdScript(
       'videogame',
-      pathname === '/'
+      pathname === '/' || gameSlug === SPACE_RACE_GAME.slug
         ? {
             '@context': 'https://schema.org',
             '@type': 'VideoGame',
-            name: 'Dice Odysseys',
+            name: gameSlug === SPACE_RACE_GAME.slug ? 'Space Race' : 'Dice Odysseys',
             url: SITE_ORIGIN,
             image: socialImage,
             description: seo.description,
@@ -611,6 +650,14 @@ function App() {
         ]
       }
 
+      if (isSpaceRaceHowToPlayPath) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Space Race', path: `/games/${SPACE_RACE_GAME.slug}` },
+          { name: 'How to Play', path: `/games/${SPACE_RACE_GAME.slug}/how-to-play` },
+        ]
+      }
+
       if (pathname === '/opponents') {
         return [
           { name: 'Home', path: '/' },
@@ -651,6 +698,13 @@ function App() {
         return [{ name: 'Home', path: '/' }]
       }
 
+      if (gameSlug === SPACE_RACE_GAME.slug) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Space Race', path: `/games/${SPACE_RACE_GAME.slug}` },
+        ]
+      }
+
       return []
     })()
 
@@ -669,7 +723,7 @@ function App() {
           }
         : null,
     )
-  }, [pathname, opponentBioSlug])
+  }, [isSpaceRaceHowToPlayPath, pathname, opponentBioSlug])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -714,18 +768,24 @@ function App() {
   }, [helpOpen])
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    saveHomeLaunchState({
+      selectedGameSlug,
+      homeStartMode,
+      mode,
+      difficulty,
+      humanName,
+      aiCount,
+      hotseatCount,
+      hotseatNames,
+    })
+  }, [selectedGameSlug, homeStartMode, mode, difficulty, humanName, aiCount, hotseatCount, hotseatNames])
+
+  useEffect(() => {
+    if (!hotseatCountInitializedRef.current) {
+      hotseatCountInitializedRef.current = true
       return
     }
 
-    window.localStorage.setItem(HOME_MODE_STORAGE_KEY, mode)
-  }, [mode])
-
-  useEffect(() => {
-    setMode('single')
-  }, [])
-
-  useEffect(() => {
     setHotseatNames(buildDefaultHotseatNames(hotseatCount))
   }, [hotseatCount])
 
@@ -1469,6 +1529,10 @@ function App() {
   ])
 
   const handleStart = () => {
+    if (selectedGame.slug !== SPACE_RACE_GAME.slug || selectedGame.status !== 'active') {
+      return
+    }
+
     if (mode === 'multiplayer') {
       return
     }
@@ -1495,6 +1559,7 @@ function App() {
           animationEnabled,
         },
       })
+      navigate(`/games/${SPACE_RACE_GAME.slug}`)
       return
     }
 
@@ -1509,6 +1574,7 @@ function App() {
         animationEnabled,
       },
     })
+    navigate(`/games/${SPACE_RACE_GAME.slug}`)
   }
 
   const handleStartInstantAdventure = useCallback((options?: { aiCount?: number; selectedAiSlug?: string }) => {
@@ -1543,6 +1609,7 @@ function App() {
         animationEnabled,
       },
     })
+    navigate(`/games/${SPACE_RACE_GAME.slug}`)
     trackUnifiedPlayEvent('match_entered', {
       entryPoint: 'INSTANT_ADVENTURE',
       humanCount: 1,
@@ -1553,6 +1620,7 @@ function App() {
     clearOnlineContextForOfflineStart,
     debugEnabled,
     humanName,
+    navigate,
     profileDisplayName,
     setMatchStartStateTracked,
     trackUnifiedPlayEvent,
@@ -1976,6 +2044,14 @@ function App() {
     return () => window.clearTimeout(timer)
   }, [onlineSessionId, onlineSnapshot, quickOnlineFlowActive, setMatchStartStateTracked, trackUnifiedPlayEvent])
 
+  useEffect(() => {
+    if (!onlineSnapshot?.gameState.started || pathname === `/games/${SPACE_RACE_GAME.slug}`) {
+      return
+    }
+
+    navigate(`/games/${SPACE_RACE_GAME.slug}`)
+  }, [navigate, onlineSnapshot?.gameState.started, pathname])
+
   const handleEndTurn = () => {
     if (!currentPlayer || currentPlayer.isAI || isResolving) {
       return
@@ -2331,6 +2407,15 @@ function App() {
     )
   }
 
+  if (isSpaceRaceHowToPlayPath) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <SpaceRaceHowToPlayPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
   if (pathname === '/opponents') {
     return (
       <div className="flex min-h-screen flex-col">
@@ -2376,11 +2461,72 @@ function App() {
     )
   }
 
-  if (pathname !== '/') {
+  if (gameSlugFromPath && !routedGame) {
     return <Navigate to="/" replace />
   }
 
-  if (!authoritativeState.started) {
+  if (gameSlugFromPath && routedGame?.status === 'coming-soon') {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <div className="mx-auto flex w-full max-w-4xl flex-1 items-center p-6">
+          <section className="w-full rounded-2xl border border-slate-700 bg-slate-950/80 p-6 text-slate-100">
+            <p className="text-sm uppercase tracking-wide text-cyan-300">Dice Odysseys</p>
+            <h1 className="mt-1 text-3xl font-bold text-cyan-100">{routedGame.name}</h1>
+            <p className="mt-2 text-sm text-slate-300">{routedGame.summary}</p>
+            <p className="mt-3 rounded-lg border border-cyan-500/50 bg-cyan-900/20 px-3 py-2 text-sm text-cyan-100">
+              This game is coming soon. Space Race is live now.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Link
+                to="/"
+                className="rounded-md bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+              >
+                Back to Home
+              </Link>
+              <Link
+                to={`/games/${SPACE_RACE_GAME.slug}`}
+                className="rounded-md border border-slate-500 px-4 py-2 text-sm font-semibold text-slate-100"
+              >
+                Play Space Race
+              </Link>
+            </div>
+          </section>
+        </div>
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (pathname !== '/' && !gameSlugFromPath) {
+    return <Navigate to="/" replace />
+  }
+
+  if (isSpaceRaceRoute && !authoritativeState.started) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <div className="mx-auto flex w-full max-w-4xl flex-1 items-center p-6">
+          <section className="w-full rounded-2xl border border-slate-700 bg-slate-950/80 p-6 text-slate-100">
+            <p className="text-sm uppercase tracking-wide text-cyan-300">Dice Odysseys</p>
+            <h1 className="mt-1 text-3xl font-bold text-cyan-100">Space Race</h1>
+            <p className="mt-2 text-sm text-slate-300">
+              Select your options on the home screen, then launch the game.
+            </p>
+            <div className="mt-4">
+              <Link
+                to="/"
+                className="rounded-md bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+              >
+                Go to Home Launcher
+              </Link>
+            </div>
+          </section>
+        </div>
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (pathname === '/') {
     return (
       <div className="flex min-h-screen flex-col">
         <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center p-6">
@@ -2415,6 +2561,12 @@ function App() {
               >
                 About
               </Link>
+              <Link
+                to="/games/space-race/how-to-play"
+                className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
+              >
+                How to Play
+              </Link>
             </div>
           </div>
 
@@ -2432,6 +2584,45 @@ function App() {
           </div>
 
           <section className="rounded-xl border border-cyan-500/50 bg-cyan-950/20 p-4">
+            <div className="mb-3">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <h2 className="text-lg font-semibold text-cyan-100">Choose your game</h2>
+                <p className="text-sm text-cyan-50/90">Dice Odysseys now supports multiple games.</p>
+              </div>
+              <div className="mt-2 grid gap-2 md:grid-cols-3">
+                {GAME_CATALOG.map((game) => {
+                  const isSelected = selectedGameSlug === game.slug
+                  const isActive = game.status === 'active'
+                  return (
+                    <button
+                      key={game.slug}
+                      type="button"
+                      className={`rounded-lg border px-3 py-2 text-left ${
+                        isSelected
+                          ? 'border-cyan-300/90 bg-cyan-900/40 text-cyan-50'
+                          : 'border-slate-400/70 bg-slate-900/60 text-slate-100'
+                      } ${!isActive ? 'opacity-85' : ''}`}
+                      onClick={() => setSelectedGameSlug(game.slug)}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold">{game.name}</p>
+                        <span
+                          className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                            isActive
+                              ? 'border-emerald-300/80 text-emerald-100'
+                              : 'border-amber-300/80 text-amber-100'
+                          }`}
+                        >
+                          {isActive ? 'Live' : 'Coming Soon'}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs">{game.summary}</p>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
             <div className="flex flex-wrap items-baseline gap-2">
               <h2 className="text-lg font-semibold text-cyan-100">Choose your next mission</h2>
               <p className="text-sm text-cyan-50/90">Pick your mode, configure, and start playing...</p>
@@ -2446,6 +2637,7 @@ function App() {
                     : 'border-slate-400/70 bg-slate-900/60 text-slate-100'
                 }`}
                 onClick={() => handleSelectHomeStartMode('INSTANT')}
+                disabled={selectedGame.status !== 'active'}
               >
                 <p className="text-sm font-semibold">Instant Adventure</p>
                 <p className="mt-1 text-xs">Single player vs AI opponents.</p>
@@ -2459,6 +2651,7 @@ function App() {
                     : 'border-slate-400/70 bg-slate-900/60 text-slate-100'
                 }`}
                 onClick={() => handleSelectHomeStartMode('HOTSEAT')}
+                disabled={selectedGame.status !== 'active'}
               >
                 <p className="text-sm font-semibold">Hotseat Multiplayer</p>
                 <p className="mt-1 text-xs">Local turn-by-turn multiplayer.</p>
@@ -2472,6 +2665,7 @@ function App() {
                     : 'border-slate-400/70 bg-slate-900/60 text-slate-100'
                 }`}
                 onClick={() => handleSelectHomeStartMode('ONLINE')}
+                disabled={selectedGame.status !== 'active'}
               >
                 <p className="text-sm font-semibold">Online Match</p>
                 <p className="mt-1 text-xs">Find others for online play.</p>
@@ -2486,8 +2680,13 @@ function App() {
                 {homeModeHint}
               </p>
             )}
+            {selectedGame.status !== 'active' && (
+              <p className="mt-2 rounded-md border border-amber-400/50 bg-amber-950/30 px-2 py-1.5 text-xs text-amber-100">
+                {selectedGame.name} is coming soon. Select Space Race to play now.
+              </p>
+            )}
           </section>
-          {homeStartMode === 'INSTANT' && (
+          {selectedGame.status === 'active' && homeStartMode === 'INSTANT' && (
             <section className="grid gap-3 lg:grid-cols-4">
               <label className="flex flex-col gap-1 text-sm text-slate-200">
                 AI Difficulty
@@ -2525,7 +2724,7 @@ function App() {
             </section>
           )}
 
-          {homeStartMode === 'HOTSEAT' && (
+          {selectedGame.status === 'active' && homeStartMode === 'HOTSEAT' && (
             <section className="grid gap-3 lg:grid-cols-4">
               <label className="flex flex-col gap-1 text-sm text-slate-200">
                 Players
@@ -2552,7 +2751,7 @@ function App() {
             </section>
           )}
 
-          {homeStartMode === 'ONLINE' && (
+          {selectedGame.status === 'active' && homeStartMode === 'ONLINE' && (
             <section className="space-y-3 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-200">
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2 rounded border border-slate-700 bg-slate-950/40 p-2">
@@ -2623,21 +2822,21 @@ function App() {
             </section>
           )}
 
-          {(homeStartMode === 'INSTANT' || homeStartMode === 'HOTSEAT') && (
+          {selectedGame.status === 'active' && (homeStartMode === 'INSTANT' || homeStartMode === 'HOTSEAT') && (
             <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-2">
               <button
                 type="button"
                 className="rounded-md bg-cyan-500 px-5 py-2 font-semibold text-slate-950 lg:whitespace-nowrap"
                 onClick={handleStart}
-                disabled={isOnlineMode}
+                disabled={isOnlineMode || selectedGame.status !== 'active'}
               >
-                Start Game
+                Start {selectedGame.name}
               </button>
             </div>
           )}
 
 
-          {homeStartMode === 'ONLINE' && mode === 'multiplayer' && (onlineStatusMessage || onlineError || onlineSessionId || matchStartState !== 'IDLE') && (
+          {selectedGame.status === 'active' && homeStartMode === 'ONLINE' && mode === 'multiplayer' && (onlineStatusMessage || onlineError || onlineSessionId || matchStartState !== 'IDLE') && (
             <div className="mt-3 space-y-2 rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-200">
               {matchStartState !== 'IDLE' && matchStartStateCopy[matchStartState] && (
                 <div className="rounded-md border border-cyan-400/40 bg-cyan-900/20 px-2 py-1.5">
@@ -2740,7 +2939,7 @@ function App() {
           )}
 
 
-          {homeStartMode === 'ONLINE' && mode === 'multiplayer' && SHOW_DEBUG_CONTROLS && (
+          {selectedGame.status === 'active' && homeStartMode === 'ONLINE' && mode === 'multiplayer' && SHOW_DEBUG_CONTROLS && (
             <section className="mt-4 space-y-2 rounded-md border border-slate-700 bg-slate-900/50 p-3 text-xs text-slate-300">
               <p className="font-semibold text-slate-200">Temporary Debug (remove later)</p>
               <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
@@ -2778,25 +2977,19 @@ function App() {
 
             <aside className="grid gap-3 xl:content-start">
               <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-                <h2 className="text-sm font-semibold text-cyan-200">What</h2>
+                <h2 className="text-sm font-semibold text-cyan-200">More Content Coming Soon</h2>
                 <p className="mt-1 text-xs text-slate-300">
-                  Dice Odysseys is a turn-based space race. Move across planets, claim MacGuffins,
-                  and disrupt rivals before the galaxy collapses.
+                  We are expanding Dice Odysseys with new guides, strategy spotlights, and game pages.
+                  For now, visit Space Race How to Play for the full rules and tactical overview.
                 </p>
-              </article>
-              <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-                <h2 className="text-sm font-semibold text-cyan-200">How</h2>
-                <p className="mt-1 text-xs text-slate-300">
-                  Assign all dice to Move, Claim, or Sabotage. Any color can go anywhere.
-                  Matching color to slot gets +1 roll value; off-color gets -1.
-                </p>
-              </article>
-              <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-                <h2 className="text-sm font-semibold text-cyan-200">Win</h2>
-                <p className="mt-1 text-xs text-slate-300">
-                  Reach 7 MacGuffins first for race victory. If the galaxy runs out, survival winner
-                  is highest MacGuffins.
-                </p>
+                <div className="mt-2">
+                  <Link
+                    to="/games/space-race/how-to-play"
+                    className="inline-flex rounded border border-slate-600 px-2 py-1 text-[11px] font-semibold text-cyan-200 hover:border-slate-500"
+                  >
+                    Read Space Race Guide
+                  </Link>
+                </div>
               </article>
 
               {featuredHomeOpponent && (
@@ -2848,414 +3041,54 @@ function App() {
   return (
     <div className="flex min-h-screen flex-col">
       <DndProvider backend={dndBackend} options={dndBackendOptions}>
-        {showHumanWinCelebration && (
-          <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden" aria-hidden="true">
-            <div className="absolute inset-0">
-              {!prefersReducedMotion &&
-                humanWinConfetti.map((particle, index) => (
-                  <span
-                    key={`${particle.left}-${particle.delay}-${index}`}
-                    className={`human-win-confetti ${particle.colorClass}`}
-                    style={{
-                      left: `${particle.left}%`,
-                      animationDelay: `${particle.delay}ms`,
-                      animationDuration: `${particle.duration}ms`,
-                    }}
-                  />
-                ))}
-            </div>
-            <div className="absolute left-1/2 top-24 h-40 w-40 -translate-x-1/2 rounded-full bg-cyan-400/20 blur-3xl" />
-            <div className="absolute left-1/2 top-20 h-52 w-52 -translate-x-1/2 rounded-full bg-emerald-400/15 blur-3xl" />
-            <div className="absolute left-1/2 top-10 -translate-x-1/2 rounded-full border border-cyan-300/60 bg-slate-900/80 px-5 py-2 text-sm font-semibold text-cyan-100 human-win-banner">
-              Human Victory!
-            </div>
-          </div>
-        )}
-        <div className="mx-auto w-full max-w-6xl flex-1 space-y-4 p-4 md:p-6">
-        <header className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-700 bg-slate-950/70 p-4">
-          <div className="flex items-center gap-3">
-            <img
-              src="/assets/branding/dice-odyssey-logo.png"
-              alt="Dice Odysseys logo"
-              className="h-14 w-14 rounded-md border border-slate-700 object-cover"
-            />
-            <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-cyan-200">Dice Odysseys</h1>
-              <div className="mt-1 flex flex-wrap items-center gap-2 pr-1 text-sm text-slate-300 md:flex-nowrap md:overflow-x-auto md:whitespace-nowrap">
-                <span className="shrink-0">Round {currentRound} · Turn {authoritativeState.turn} · Current:</span>
-                <span className="shrink-0 rounded border border-cyan-300/70 bg-cyan-900/40 px-1.5 py-0.5 font-semibold text-cyan-100">
-                  {currentPlayer?.name ?? '—'}
-                </span>
-                {activeOpponents.length > 0 && (
-                  <>
-                    <span className="mx-0.5 hidden shrink-0 text-slate-500 md:inline">·</span>
-                    <span className="shrink-0 text-slate-300">Opponents:</span>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {activeOpponents.map((opponent) => (
-                        <Link
-                          key={opponent.id}
-                          to={`/opponents/${opponent.slug}`}
-                          state={{ fromGame: true }}
-                          className="inline-flex shrink-0 items-center gap-1 rounded border border-slate-600 bg-slate-900/60 px-1.5 py-0.5 text-xs text-slate-100 hover:border-slate-500"
-                        >
-                          <span>{opponent.shortName}</span>
-                        </Link>
-                      ))}
-                    </div>
-                    <Link
-                      to="/opponents"
-                      state={{ fromGame: true }}
-                      className="shrink-0 text-xs text-cyan-300 hover:text-cyan-200 md:ml-1"
-                    >
-                      View all
-                    </Link>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5 pt-1 md:self-end md:pt-0">
-            <button
-              type="button"
-              className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold leading-tight text-slate-100"
-              onClick={() => setHelpOpen((value) => !value)}
-            >
-              {helpOpen ? 'Hide Help & Tips' : 'Show Help & Tips'}
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold leading-tight text-slate-100"
-              onClick={isOnlineMode ? handleLeaveMatch : handleNewGame}
-              disabled={onlineLifecycleSubmitting}
-            >
-              {isOnlineMode ? 'Leave Match' : 'New Game'}
-            </button>
-          </div>
-        </header>
-
-        {(onlineStatusMessage || onlineError || onlineSessionId || (isOnlineMode && onlineSnapshot && !authoritativeState.winnerId)) && (
-          <div className="grid gap-3 xl:grid-cols-2 xl:items-start">
-            {(onlineStatusMessage || onlineError || onlineSessionId) && (
-              <section className="space-y-1 rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-200 xl:h-full">
-                {onlineSessionId && debugEnabled && <p>Online session: {onlineSessionId}</p>}
-                {onlineStatusMessage && (
-                  <p
-                    className={
-                      isOnlineStatusWarning
-                        ? 'rounded-md border border-amber-400/70 bg-amber-900/30 px-2 py-1 font-semibold text-amber-100'
-                        : 'text-cyan-200'
-                    }
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {onlineStatusMessage}
-                  </p>
-                )}
-                {onlineError && <p className="text-rose-300">{onlineError}</p>}
-                {isOnlineMode && !authoritativeState.winnerId && (
-                  <div className="pt-1">
-                    <button
-                      type="button"
-                      className="rounded-md border border-amber-400 px-3 py-1.5 text-xs font-semibold text-amber-100 disabled:opacity-50"
-                      onClick={handleResign}
-                      disabled={onlineLifecycleSubmitting || onlineSubmitting || !isOnlineActivePlayer}
-                    >
-                      Resign
-                    </button>
-                  </div>
-                )}
-              </section>
-            )}
-
-            {isOnlineMode && onlineSnapshot && !authoritativeState.winnerId && (
-              <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-200 xl:h-full">
-                <p className="font-semibold text-cyan-200">Match Seats</p>
-                <ul className="mt-2 flex flex-wrap gap-2">
-                  {onlineSnapshot.playerSeats.map((seat) => (
-                    <li
-                      key={`${seat.userId}-${seat.seat}`}
-                      className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1"
-                    >
-                      <img
-                        src={getPlayerAvatarSrc(seat.avatarKey)}
-                        alt={`${seat.displayName} avatar`}
-                        className="h-7 w-7 rounded border border-slate-600 object-cover"
-                        onError={withAvatarFallback}
-                      />
-                      <span>{seat.displayName}</span>
-                      <span className="text-xs text-slate-400">— {seat.connected ? 'Connected' : 'Disconnected'}</span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-          </div>
-        )}
-
-        {authoritativeState.winnerId && (
-          <section className="space-y-3 rounded-xl border border-emerald-400 bg-emerald-900/30 p-4 text-emerald-100">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p>
-                Winner: {winnerName} ({authoritativeState.winnerReason === 'race' ? 'Race Victory' : 'Survival Victory'})
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  className="rounded border border-emerald-300 px-2 py-1 text-xs font-semibold text-emerald-100"
-                  onClick={() => setShowDebrief((value) => !value)}
-                >
-                  {showDebrief ? 'Hide Story' : 'Show Story'}
-                </button>
-                {isOnlineMode && (
-                  <>
-                    <button
-                      type="button"
-                      className="rounded border border-cyan-300 px-2 py-1 text-xs font-semibold text-cyan-100 disabled:opacity-50"
-                      onClick={handlePlayAgain}
-                      disabled={onlineLifecycleSubmitting || onlineSubmitting}
-                    >
-                      Play Again
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-100 disabled:opacity-50"
-                      onClick={handleLeaveMatch}
-                      disabled={onlineLifecycleSubmitting || onlineSubmitting}
-                    >
-                      Leave Match
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {isOnlineMode && onlineSnapshot && (
-              <div className="rounded-lg border border-emerald-500/40 bg-slate-950/30 p-3 text-xs text-emerald-50">
-                <p className="font-semibold text-emerald-200">Between Games</p>
-                <p className="mt-1">Choose <span className="font-semibold">Play Again</span> to start a rematch in this same match, or <span className="font-semibold">Leave Match</span> to return home.</p>
-                {unifiedPlayFeatureFlags.hybridRematchReplacementV1 && (
-                  <p className="mt-1 text-emerald-200/90">
-                    Rematch uses the Hybrid Slot Planner. Human-only seats must be connected before rematch starts.
-                  </p>
-                )}
-                <p className="mt-2 text-emerald-200">Seat readiness:</p>
-                <ul className="mt-1 list-disc space-y-1 pl-5">
-                  {onlineSnapshot.playerSeats.map((seat) => (
-                    <li key={`${seat.userId}-${seat.seat}`} className="flex items-center gap-2">
-                      <img
-                        src={getPlayerAvatarSrc(seat.avatarKey)}
-                        alt={`${seat.displayName} avatar`}
-                        className="h-6 w-6 rounded border border-emerald-400/70 object-cover"
-                        onError={withAvatarFallback}
-                      />
-                      <span>
-                        {seat.displayName} — {seat.connected ? 'Connected' : 'Disconnected'}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {winnerPlayer && (
-              <p className="flex items-center gap-1.5 text-sm text-emerald-100">
-                <span>Winner MacGuffins:</span>
-                <img
-                  src={MACGUFFIN_TOKEN_ICON}
-                  alt="Glowing emerald MacGuffin token, a crystalline artifact with energy core from Dice Odysseys"
-                  className="h-4 w-4 rounded object-cover"
-                />
-                <span className="font-semibold">{winnerPlayer.macGuffins}</span>
-              </p>
-            )}
-
-            {showDebrief && (
-              <div className="space-y-2 rounded-lg border border-emerald-500/40 bg-slate-950/40 p-3 text-sm text-emerald-50">
-                <p className="font-semibold text-emerald-200">Post-Game Debrief</p>
-                <p>{postGameNarrative.headline}</p>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div>
-                    <p className="font-semibold text-emerald-200">Key Moments</p>
-                    <ul className="mt-1 list-disc space-y-1 pl-5">
-                      {postGameNarrative.keyMoments.map((moment) => (
-                        <li key={moment}>{moment}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <p className="font-semibold text-emerald-200">Stats</p>
-                    <ul className="mt-1 list-disc space-y-1 pl-5">
-                      {postGameNarrative.stats.map((stat) => (
-                        <li key={stat}>{stat}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-                <p className="font-semibold text-emerald-200">Why This Winner</p>
-                <p>{postGameNarrative.whyWinner}</p>
-              </div>
-            )}
-          </section>
-        )}
-
-        {helpOpen && (
-          <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
-            <h2 className="text-lg font-semibold text-slate-100">Help & Tips</h2>
-            <div className="mt-2 grid gap-3 md:grid-cols-2">
-              <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
-                <p className="font-semibold text-cyan-200">Turn Flow</p>
-                <img
-                  src="/assets/infographics/turn-flow-infographic.png"
-                  alt="Turn flow infographic: Allocate 6 dice, Resolve Turn, Resolve Move then Claim then Sabotage"
-                  className="mt-2 w-full rounded border border-slate-700 object-cover"
-                />
-                <p className="mt-1">1) Allocate all 6 dice. 2) Press Resolve Turn. 3) Watch Move, Claim, then Sabotage outcomes in Turn Resolution using color affinity (+1 match, -1 off-color, min 1).</p>
-              </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
-                <p className="font-semibold text-cyan-200">Board Reading</p>
-                <p className="mt-1">Unknown icon/? means unrevealed. Landing reveals that planet’s face and state (Barren or MacGuffin-rich). Claim dice only test your landed planet: rolls at or above face count as successes. Face 3 awards +1, face 4 awards +2, face 5 awards +3, and face 6 awards +4 MacGuffins. Perfect Claim bonus: if all claim dice succeed, that planet reward is doubled (cap +8). Claimed means that reward was already harvested. If you start on the last planet and it is already claimed, Move sends you backward by your move total.</p>
-              </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
-                <p className="font-semibold text-cyan-200">Key Rules</p>
-                <p className="mt-1">Sabotage targets nearest rival within 2 spaces. Skip turns = sabotage total minus defense (minimum 0), capped at 3. After a forced skip, that player gets temporary skip-immunity until their next playable turn.</p>
-              </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 text-sm text-slate-300">
-                <p className="font-semibold text-cyan-200">Pacing + UI Colors</p>
-                <p className="mt-1">Galaxy shrinks every 5 turns by 2 planets. Cyan marks active captain; emerald marks winner. Dice colors are affinities: blue favors move, green favors claim, red favors sabotage.</p>
-              </div>
-            </div>
-          </section>
-        )}
-
-        <div className={isResolving ? 'pointer-events-none opacity-95' : ''}>
-          <GalaxyBoard
-            galaxy={authoritativeState.galaxy}
-            players={authoritativeState.players}
-            currentPlayerId={currentPlayer?.id}
-            resolving={isResolving}
-            playbackStage={playbackStage}
-            resolutionSummary={authoritativeState.latestTurnResolution}
-            prefersReducedMotion={prefersReducedMotion}
-          />
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="space-y-4 lg:col-span-2">
-            {currentPlayer && !authoritativeState.winnerId && currentPlayer.skippedTurns === 0 && (
-              <DicePool
-                dicePool={currentPlayer.dicePool}
-                allocation={draftAllocation}
-                disabled={
-                  currentPlayer.isAI || isResolving || (isOnlineMode && !isOnlineActivePlayer)
-                }
-                showHelpTips={helpOpen}
-                onAllocationChange={setDraftAllocation}
-                onAllocatePreferred={handleAllocatePreferred}
-              />
-            )}
-            {currentPlayer && !authoritativeState.winnerId && currentPlayer.skippedTurns > 0 && !currentPlayer.isAI && (
-              <section className="rounded-xl border border-amber-400 bg-amber-900/20 p-4 text-amber-100">
-                <h2 className="text-lg font-semibold">Turn Skipped</h2>
-                <p className="mt-1 text-sm">
-                  {currentPlayer.name} must skip this turn. Click Resolve Turn to continue.
-                </p>
-              </section>
-            )}
-            <TurnControls
-              canSubmit={
-                Boolean(currentPlayer?.skippedTurns && currentPlayer.skippedTurns > 0) ||
-                allDiceAllocated(draftAllocation)
-              }
-              disabled={
-                Boolean(authoritativeState.winnerId) ||
-                (isOnlineMode && (!isOnlineActivePlayer || onlineSubmitting))
-              }
-              isAI={Boolean(currentPlayer?.isAI) && !authoritativeState.winnerId}
-              currentAiName={currentPlayer?.isAI ? currentPlayer.name : undefined}
-              resolving={isResolving}
-              resolvingLabel={resolvingMessage}
-              showAiTurnGate={
-                !isOnlineMode &&
-                mode === 'single' &&
-                Boolean(currentPlayer?.isAI) &&
-                singlePlayerAiTurnGate &&
-                !isResolving &&
-                !authoritativeState.winnerId
-              }
-              showAiAutoPlayToggle={
-                !isOnlineMode &&
-                mode === 'single' &&
-                authoritativeState.started &&
-                !authoritativeState.winnerId
-              }
-              autoPlayAiTurns={singlePlayerAutoContinueAiTurns}
-              onAutoPlayAiTurnsChange={setSinglePlayerAutoContinueAiTurns}
-              onContinueAiTurn={() => setSinglePlayerAiTurnGate(false)}
-              onSubmit={handleEndTurn}
-              onReset={() => setDraftAllocation(emptyAllocation())}
-            />
-          </div>
-          <PlayerStatus
-            players={authoritativeState.players}
-            currentPlayerId={currentPlayer?.id}
-            playerAvatarKeyByPlayerId={isOnlineMode ? onlineHumanAvatarByPlayerId : undefined}
-            showHelpTips={helpOpen}
-          />
-        </div>
-
-        {turnResolutionRoundRecap && (
-          <section className="rounded-xl border border-cyan-400/50 bg-cyan-900/20 p-4 text-cyan-50">
-            <h2 className="text-lg font-semibold text-cyan-100">Round Recap</h2>
-            <p className="mt-2 text-xs leading-relaxed text-cyan-50">{turnResolutionRoundRecap}</p>
-          </section>
-        )}
-
-        <TurnResolution
-          summary={authoritativeState.latestTurnResolution}
-          humanSummary={latestHumanTurnResolution}
-          resolving={isResolving}
+        <SpaceRacePage
+          authoritativeState={authoritativeState}
+          currentRound={currentRound}
+          currentPlayer={currentPlayer}
+          winnerName={winnerName}
+          winnerPlayer={winnerPlayer}
+          postGameNarrative={postGameNarrative}
+          turnResolutionRoundRecap={turnResolutionRoundRecap}
+          latestHumanTurnResolution={latestHumanTurnResolution}
+          activeOpponents={activeOpponents}
+          helpOpen={helpOpen}
+          isOnlineMode={isOnlineMode}
+          isOnlineActivePlayer={isOnlineActivePlayer}
+          isOnlineStatusWarning={isOnlineStatusWarning}
+          onlineStatusMessage={onlineStatusMessage}
+          onlineError={onlineError}
+          onlineSessionId={onlineSessionId}
+          onlineSnapshot={onlineSnapshot}
+          onlineLifecycleSubmitting={onlineLifecycleSubmitting}
+          onlineSubmitting={onlineSubmitting}
+          playerAvatarKeyByPlayerId={isOnlineMode ? onlineHumanAvatarByPlayerId : undefined}
+          draftAllocation={draftAllocation}
+          isResolving={isResolving}
           playbackStage={playbackStage}
-        />
-
-        <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
-          <div className="mb-2 flex flex-col gap-1 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
-            <h2 className="text-lg font-semibold text-slate-100">Turn Log</h2>
-            <p className="text-xs text-slate-400 lg:max-w-4xl lg:text-right">Read newest entries at top. Badges show round, turn, acting player, and event type. Each card is one resolved turn. Multiple lines in a card are outcomes from that same turn.</p>
-          </div>
-          <TurnLog log={authoritativeState.log} players={authoritativeState.players} />
-        </section>
-
-        {authoritativeState.debugEnabled && (
-          <section className="rounded-xl border border-fuchsia-500/60 bg-fuchsia-950/10 p-4 text-fuchsia-100">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold">Debug Log</h2>
-              <button
-                type="button"
-                className="rounded border border-fuchsia-300 px-2 py-1 text-xs font-semibold"
-                onClick={handleDownloadDebugLog}
-                disabled={authoritativeState.debugLog.length === 0}
-              >
-                Download JSON
-              </button>
-            </div>
-            <p className="mt-1 text-xs text-fuchsia-200">
-              Debug logging is enabled. Export this JSON after a game and share it for move-by-move analysis.
-            </p>
-            <details className="mt-3">
-              <summary className="cursor-pointer text-sm font-semibold">Preview latest debug entries</summary>
-              <pre className="mt-2 max-h-64 overflow-auto rounded border border-fuchsia-500/30 bg-slate-950/80 p-3 text-xs text-fuchsia-100">
-{JSON.stringify(authoritativeState.debugLog.slice(-5), null, 2)}
-              </pre>
-            </details>
-          </section>
-        )}
-        </div>
-
-        <ResolveDiceAnimation
-          active={showResolveAnimation}
-          playerName={currentPlayer?.name}
-          variant={resolveAnimationVariant}
+          resolvingMessage={resolvingMessage}
+          mode={mode}
+          singlePlayerAiTurnGate={singlePlayerAiTurnGate}
+          singlePlayerAutoContinueAiTurns={singlePlayerAutoContinueAiTurns}
+          showDebrief={showDebrief}
+          showResolveAnimation={showResolveAnimation}
+          resolveAnimationVariant={resolveAnimationVariant}
+          showHumanWinCelebration={showHumanWinCelebration}
           prefersReducedMotion={prefersReducedMotion}
+          humanWinConfetti={humanWinConfetti}
+          unifiedPlayHybridRematchEnabled={unifiedPlayFeatureFlags.hybridRematchReplacementV1}
+          onToggleHelp={() => setHelpOpen((value) => !value)}
+          onLeaveOrNewGame={isOnlineMode ? handleLeaveMatch : handleNewGame}
+          onToggleDebrief={() => setShowDebrief((value) => !value)}
+          onPlayAgain={handlePlayAgain}
+          onLeaveMatch={handleLeaveMatch}
+          onResign={handleResign}
+          onAllocatePreferred={handleAllocatePreferred}
+          onAllocationChange={setDraftAllocation}
+          onSubmitTurn={handleEndTurn}
+          onResetAllocation={() => setDraftAllocation(emptyAllocation())}
+          onSetAutoPlayAiTurns={setSinglePlayerAutoContinueAiTurns}
+          onContinueAiTurn={() => setSinglePlayerAiTurnGate(false)}
+          onDownloadDebugLog={handleDownloadDebugLog}
         />
       </DndProvider>
       <AppFooter />
