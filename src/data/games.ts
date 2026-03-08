@@ -21,10 +21,10 @@ export const GAME_CATALOG: ReadonlyArray<GameCatalogEntry> = [
     status: 'active',
   },
   {
-    slug: 'nebula-heist',
-    name: 'Nebula Heist',
-    summary: 'Coming soon: coordinated raids across unstable sectors.',
-    status: 'coming-soon',
+    slug: 'mythic-reveal',
+    name: 'Mythic Reveal',
+    summary: 'Unveil a six-part prophecy before your rival can sabotage your progress.',
+    status: 'active',
   },
 ]
 

@@ -14,6 +14,8 @@ import { LegalPage } from './pages/LegalPage'
 import { OpponentBioPage } from './pages/OpponentBioPage'
 import { OpponentsPage } from './pages/OpponentsPage'
 import { ProfilePage } from './pages/ProfilePage'
+import { MythicRevealHowToPlayPage } from './pages/MythicRevealHowToPlayPage'
+import { MythicRevealPage } from './pages/MythicRevealPage'
 import { SpaceRacePage } from './pages/SpaceRacePage'
 import { SpaceRaceHowToPlayPage } from './pages/SpaceRaceHowToPlayPage'
 import { VoyageHomeHowToPlayPage } from './pages/VoyageHomeHowToPlayPage'
@@ -26,6 +28,10 @@ import { chooseVoyageHomeAction } from './voyageHome/ai'
 import { DEFAULT_TARGET_LEAGUES } from './voyageHome/constants'
 import { initialVoyageHomeState, voyageHomeReducer } from './voyageHome/reducer'
 import type { VoyageHomeAiProfile, VoyageHomeState } from './voyageHome/types'
+import { chooseMythicRevealAction } from './mythicReveal/ai'
+import { initialMythicRevealState, mythicRevealReducer } from './mythicReveal/reducer'
+import { getCurrentPlayer as getMythicCurrentPlayer } from './mythicReveal/selectors'
+import type { MythicRevealAiProfile } from './mythicReveal/types'
 import { buildPostGameNarrative } from './utils/buildPostGameNarrative'
 import { preloadDiceAnimationAssets } from './utils/dieAssets'
 import { loadHomeLaunchState, saveHomeLaunchState } from './utils/homeLaunchState'
@@ -46,6 +52,7 @@ import type { RealtimeEvent, SessionLifecycleAck, SessionSnapshot, TurnAck } fro
 const HELP_STORAGE_KEY = 'dice-odysseys-help-open'
 const AI_THINK_DELAY_MS = 600
 const VOYAGE_AI_THINK_DELAY_MS = 500
+const MYTHIC_AI_THINK_DELAY_MS = 500
 const VOYAGE_ROLL_SPIN_MS = 900
 const VOYAGE_ROLL_RESULT_REVEAL_MS = 1400
 const VOYAGE_SHIPWRECK_REVEAL_MS = 2000
@@ -165,6 +172,20 @@ const AI_SLUG_TO_VOYAGE_PROFILE: Record<string, VoyageHomeAiProfile> = {
   odys: 'odys',
   poly: 'poly',
   polly: 'poly',
+}
+
+const AI_SLUG_TO_MYTHIC_PROFILE: Record<string, MythicRevealAiProfile> = {
+  circe: 'circe',
+  poly: 'poly',
+  polly: 'poly',
+}
+
+const buildMythicAiProfileForSelection = (selectedAiSlug?: string): MythicRevealAiProfile => {
+  if (!selectedAiSlug) {
+    return 'circe'
+  }
+
+  return AI_SLUG_TO_MYTHIC_PROFILE[selectedAiSlug.toLowerCase()] ?? 'circe'
 }
 type MatchStartState =
   | 'IDLE'
@@ -336,12 +357,14 @@ function App() {
   const pathname = getNormalizedPathname(location.pathname)
   const isSpaceRaceHowToPlayPath = pathname === `/games/${SPACE_RACE_GAME.slug}/how-to-play`
   const isVoyageHomeHowToPlayPath = pathname === '/games/voyage-home/how-to-play'
+  const isMythicRevealHowToPlayPath = pathname === '/games/mythic-reveal/how-to-play'
   const isHowToPlayPath = pathname === '/how-to-play'
   const opponentBioSlug = getOpponentBioSlug(pathname)
   const gameSlugFromPath = getGameSlugFromPath(pathname)
   const persistedLauncherState = useMemo(() => loadHomeLaunchState(), [])
   const [state, dispatch] = useReducer(gameReducer, initialGameState)
   const [voyageState, voyageDispatch] = useReducer(voyageHomeReducer, initialVoyageHomeState)
+  const [mythicState, mythicDispatch] = useReducer(mythicRevealReducer, initialMythicRevealState)
   const [selectedGameSlug, setSelectedGameSlug] = useState<string>(persistedLauncherState.selectedGameSlug)
   const [mode, setMode] = useState<GameMode>(persistedLauncherState.mode)
   const [homeStartMode, setHomeStartMode] = useState<HomeStartMode>(persistedLauncherState.homeStartMode)
@@ -350,6 +373,7 @@ function App() {
   const [aiCount, setAiCount] = useState(persistedLauncherState.aiCount)
   const [hotseatCount, setHotseatCount] = useState(persistedLauncherState.hotseatCount)
   const [hotseatNames, setHotseatNames] = useState(persistedLauncherState.hotseatNames)
+  const [mythicAiProfile, setMythicAiProfile] = useState<MythicRevealAiProfile>('circe')
   const [debugEnabled, setDebugEnabled] = useState(false)
   const [animationEnabled, setAnimationEnabled] = useState(true)
   const [draftAllocation, setDraftAllocation] = useState<Allocation>(emptyAllocation())
@@ -362,6 +386,7 @@ function App() {
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
   const [showHumanWinCelebration, setShowHumanWinCelebration] = useState(false)
   const [showVoyageWinCelebration, setShowVoyageWinCelebration] = useState(false)
+  const [showMythicWinCelebration, setShowMythicWinCelebration] = useState(false)
   const [onlineSessionId, setOnlineSessionId] = useState<string | null>(null)
   const [onlineJoinSessionId, setOnlineJoinSessionId] = useState('')
   const [onlineSnapshot, setOnlineSnapshot] = useState<SessionSnapshot | null>(null)
@@ -387,6 +412,7 @@ function App() {
   const [voyageShipwreckPlayerName, setVoyageShipwreckPlayerName] = useState<string | undefined>(undefined)
   const [voyageAiTurnGate, setVoyageAiTurnGate] = useState(false)
   const [voyageAutoPlayAiTurns, setVoyageAutoPlayAiTurns] = useState(false)
+  const [isMythicAiThinking, setIsMythicAiThinking] = useState(false)
 
   const auth0Audience = useMemo(() => {
     try {
@@ -417,6 +443,7 @@ function App() {
   const voyageShipwreckTimerRef = useRef<number | null>(null)
   const celebrationTimerRef = useRef<number | null>(null)
   const voyageCelebrationTimerRef = useRef<number | null>(null)
+  const mythicCelebrationTimerRef = useRef<number | null>(null)
   const onlineRealtimeRef = useRef<SessionRealtimeController | null>(null)
   const onlineSessionGuardRef = useRef<string | null>(null)
   const onlineLobbyBootstrappingRef = useRef(false)
@@ -446,8 +473,13 @@ function App() {
   const routedGame = gameSlugFromPath ? findGameBySlug(gameSlugFromPath) : undefined
   const isSpaceRaceRoute = gameSlugFromPath === SPACE_RACE_GAME.slug
   const isVoyageHomeRoute = gameSlugFromPath === 'voyage-home'
+  const isMythicRevealRoute = gameSlugFromPath === 'mythic-reveal'
   const onlineModeAllowedForSelectedGame =
     selectedGame.slug === SPACE_RACE_GAME.slug || selectedGame.slug === 'voyage-home'
+  const hotseatModeAllowedForSelectedGame = selectedGame.slug !== 'mythic-reveal'
+  const authoritativeMythicState = mythicState
+  const mythicCurrentPlayer =
+    authoritativeMythicState.started ? getMythicCurrentPlayer(authoritativeMythicState) : undefined
   const isOnlineMode = Boolean(onlineSessionId)
   const currentPlayer = authoritativeState.players[authoritativeState.currentPlayerIndex]
   const voyageCurrentPlayer =
@@ -538,7 +570,7 @@ function App() {
         return {
           title: 'How to Play | Dice Odysseys',
           description:
-            'Learn Dice Odysseys basics and access game-specific guides for Space Race and Voyage Home.',
+            'Learn Dice Odysseys basics and access game-specific guides for Space Race, Voyage Home, and Mythic Reveal.',
           path: '/how-to-play',
         }
       }
@@ -549,6 +581,15 @@ function App() {
           description:
             'Learn Voyage Home rules, curse flow, turn strategy, and sudden-death tie handling in the complete How to Play guide.',
           path: '/games/voyage-home/how-to-play',
+        }
+      }
+
+      if (isMythicRevealHowToPlayPath) {
+        return {
+          title: 'How to Play Mythic Reveal | Dice Odysseys',
+          description:
+            'Learn Mythic Reveal rules, one-reveal turns, sabotage timing, and prophecy race strategy in the complete guide.',
+          path: '/games/mythic-reveal/how-to-play',
         }
       }
 
@@ -612,6 +653,15 @@ function App() {
           description:
             `Play Voyage Home: a risk-driven sea race where captains roll, hold, and curse leaders to reach ${DEFAULT_TARGET_LEAGUES} leagues first.`,
           path: '/games/voyage-home',
+        }
+      }
+
+      if (gameSlug === 'mythic-reveal') {
+        return {
+          title: 'Mythic Reveal | Dice Odysseys',
+          description:
+            'Play Mythic Reveal: roll, uncover prophecy sections, and sabotage rival progress in a fast two-player duel versus AI.',
+          path: '/games/mythic-reveal',
         }
       }
 
@@ -698,7 +748,7 @@ function App() {
 
     upsertJsonLdScript(
       'videogame',
-      pathname === '/' || gameSlug === SPACE_RACE_GAME.slug || gameSlug === 'voyage-home'
+      pathname === '/' || gameSlug === SPACE_RACE_GAME.slug || gameSlug === 'voyage-home' || gameSlug === 'mythic-reveal'
         ? {
             '@context': 'https://schema.org',
             '@type': 'VideoGame',
@@ -707,6 +757,8 @@ function App() {
                 ? 'Space Race'
                 : gameSlug === 'voyage-home'
                   ? 'Voyage Home'
+                  : gameSlug === 'mythic-reveal'
+                    ? 'Mythic Reveal'
                   : 'Dice Odysseys',
             url: SITE_ORIGIN,
             image: socialImage,
@@ -774,6 +826,14 @@ function App() {
         ]
       }
 
+      if (isMythicRevealHowToPlayPath) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Mythic Reveal', path: '/games/mythic-reveal' },
+          { name: 'How to Play', path: '/games/mythic-reveal/how-to-play' },
+        ]
+      }
+
       if (pathname === '/opponents') {
         return [
           { name: 'Home', path: '/' },
@@ -828,6 +888,13 @@ function App() {
         ]
       }
 
+      if (gameSlug === 'mythic-reveal') {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Mythic Reveal', path: '/games/mythic-reveal' },
+        ]
+      }
+
       return []
     })()
 
@@ -846,7 +913,7 @@ function App() {
           }
         : null,
     )
-  }, [isSpaceRaceHowToPlayPath, isVoyageHomeHowToPlayPath, isHowToPlayPath, pathname, opponentBioSlug])
+  }, [isSpaceRaceHowToPlayPath, isVoyageHomeHowToPlayPath, isMythicRevealHowToPlayPath, isHowToPlayPath, pathname, opponentBioSlug])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -934,6 +1001,11 @@ function App() {
         window.clearTimeout(voyageCelebrationTimerRef.current)
         voyageCelebrationTimerRef.current = null
       }
+
+      if (mythicCelebrationTimerRef.current !== null) {
+        window.clearTimeout(mythicCelebrationTimerRef.current)
+        mythicCelebrationTimerRef.current = null
+      }
     }
   }, [])
 
@@ -972,6 +1044,18 @@ function App() {
 
     voyageLobbyOpenedTrackedRef.current = false
   }, [homeStartMode, mode, pathname, selectedGameSlug, trackUnifiedPlayEvent])
+
+  useEffect(() => {
+    if (selectedGame.slug !== 'mythic-reveal') {
+      return
+    }
+
+    if (homeStartMode !== 'INSTANT' || mode !== 'single') {
+      setHomeStartMode('INSTANT')
+      setMode('single')
+      setHomeModeHint('Mythic Reveal currently supports Instant Adventure only.')
+    }
+  }, [homeStartMode, mode, selectedGame.slug])
 
   useEffect(() => {
     if (!hotseatCountInitializedRef.current) {
@@ -1029,6 +1113,11 @@ function App() {
   const voyageWinnerPlayer = useMemo(
     () => authoritativeVoyageState.players.find((player) => player.id === authoritativeVoyageState.winnerId),
     [authoritativeVoyageState.players, authoritativeVoyageState.winnerId],
+  )
+
+  const mythicWinnerPlayer = useMemo(
+    () => authoritativeMythicState.players.find((player) => player.id === authoritativeMythicState.winnerId),
+    [authoritativeMythicState.players, authoritativeMythicState.winnerId],
   )
 
   useEffect(() => {
@@ -1540,6 +1629,31 @@ function App() {
     }, celebrationStartDelay)
   }, [authoritativeVoyageState.winnerId, voyageWinnerPlayer, prefersReducedMotion])
 
+  useEffect(() => {
+    if (mythicCelebrationTimerRef.current !== null) {
+      window.clearTimeout(mythicCelebrationTimerRef.current)
+      mythicCelebrationTimerRef.current = null
+    }
+
+    if (!authoritativeMythicState.winnerId || !mythicWinnerPlayer) {
+      setShowMythicWinCelebration(false)
+      return
+    }
+
+    window.scrollTo({ top: 0, left: 0, behavior: prefersReducedMotion ? 'auto' : 'smooth' })
+
+    const celebrationStartDelay = prefersReducedMotion ? 0 : HUMAN_WIN_SCROLL_LEAD_MS
+    mythicCelebrationTimerRef.current = window.setTimeout(() => {
+      setShowMythicWinCelebration(true)
+
+      const celebrationDuration = prefersReducedMotion ? HUMAN_WIN_REDUCED_MOTION_MS : HUMAN_WIN_CELEBRATION_MS
+      mythicCelebrationTimerRef.current = window.setTimeout(() => {
+        setShowMythicWinCelebration(false)
+        mythicCelebrationTimerRef.current = null
+      }, celebrationDuration)
+    }, celebrationStartDelay)
+  }, [authoritativeMythicState.winnerId, mythicWinnerPlayer, prefersReducedMotion])
+
   const currentRound = useMemo(() => {
     const playerCount = Math.max(authoritativeState.players.length, 1)
     return Math.floor((authoritativeState.turn - 1) / playerCount) + 1
@@ -1917,6 +2031,38 @@ function App() {
     voyageCurrentPlayer,
   ])
 
+  useEffect(() => {
+    if (
+      !isMythicRevealRoute ||
+      mode !== 'single' ||
+      !authoritativeMythicState.started ||
+      authoritativeMythicState.winnerId ||
+      !mythicCurrentPlayer?.isAI
+    ) {
+      setIsMythicAiThinking(false)
+      return
+    }
+
+    setIsMythicAiThinking(true)
+    const timer = window.setTimeout(() => {
+      const nextAction = chooseMythicRevealAction(authoritativeMythicState, mythicCurrentPlayer)
+      if (nextAction) {
+        mythicDispatch(nextAction)
+      }
+      setIsMythicAiThinking(false)
+    }, MYTHIC_AI_THINK_DELAY_MS)
+
+    return () => {
+      window.clearTimeout(timer)
+      setIsMythicAiThinking(false)
+    }
+  }, [
+    authoritativeMythicState,
+    isMythicRevealRoute,
+    mode,
+    mythicCurrentPlayer,
+  ])
+
   const buildVoyageAiProfiles = (count: number): VoyageHomeAiProfile[] => {
     const cycle: VoyageHomeAiProfile[] = ['odys', 'posei', 'poly']
     return Array.from({ length: count }, (_, index) => cycle[index % cycle.length])
@@ -2014,6 +2160,21 @@ function App() {
       return
     }
 
+    if (selectedGame.slug === 'mythic-reveal') {
+      const instantName = humanName.trim() || 'Captain'
+      mythicDispatch({
+        type: 'INIT_MYTHIC_REVEAL',
+        payload: {
+          mode: 'single',
+          humanName: instantName,
+          aiProfile: mythicAiProfile,
+          debugEnabled,
+        },
+      })
+      navigate('/games/mythic-reveal')
+      return
+    }
+
     if (mode === 'hotseat') {
       const parsed = hotseatNames
         .split(',')
@@ -2092,6 +2253,19 @@ function App() {
         },
       })
       navigate('/games/voyage-home')
+    } else if (selected.slug === 'mythic-reveal') {
+      mythicDispatch({
+        type: 'INIT_MYTHIC_REVEAL',
+        payload: {
+          mode: 'single',
+          humanName: instantName,
+          aiProfile: options?.selectedAiSlug
+            ? buildMythicAiProfileForSelection(options.selectedAiSlug)
+            : mythicAiProfile,
+          debugEnabled,
+        },
+      })
+      navigate('/games/mythic-reveal')
     } else {
       dispatch({
         type: 'INIT_GAME',
@@ -2123,6 +2297,7 @@ function App() {
     navigate,
     profileDisplayName,
     selectedGameSlug,
+    mythicAiProfile,
     setMatchStartStateTracked,
     trackUnifiedPlayEvent,
   ])
@@ -2339,6 +2514,50 @@ function App() {
     navigate('/')
   }, [navigate])
 
+  const handleMythicRoll = useCallback(() => {
+    if (!authoritativeMythicState.started || authoritativeMythicState.winnerId || mythicCurrentPlayer?.isAI) {
+      return
+    }
+
+    mythicDispatch({ type: 'ROLL_DICE' })
+  }, [authoritativeMythicState.started, authoritativeMythicState.winnerId, mythicCurrentPlayer?.isAI])
+
+  const handleMythicReveal = useCallback((face: number) => {
+    if (!authoritativeMythicState.started || authoritativeMythicState.winnerId || mythicCurrentPlayer?.isAI) {
+      return
+    }
+
+    mythicDispatch({ type: 'CHOOSE_REVEAL', payload: { face } })
+  }, [authoritativeMythicState.started, authoritativeMythicState.winnerId, mythicCurrentPlayer?.isAI])
+
+  const handleMythicSabotage = useCallback((face: number) => {
+    if (!authoritativeMythicState.started || authoritativeMythicState.winnerId || mythicCurrentPlayer?.isAI) {
+      return
+    }
+
+    mythicDispatch({ type: 'CHOOSE_SABOTAGE', payload: { targetFace: face } })
+  }, [authoritativeMythicState.started, authoritativeMythicState.winnerId, mythicCurrentPlayer?.isAI])
+
+  const handleMythicEndTurn = useCallback(() => {
+    if (!authoritativeMythicState.started || authoritativeMythicState.winnerId || mythicCurrentPlayer?.isAI) {
+      return
+    }
+
+    mythicDispatch({ type: 'END_TURN' })
+  }, [authoritativeMythicState.started, authoritativeMythicState.winnerId, mythicCurrentPlayer?.isAI])
+
+  const handleMythicNewGame = useCallback(() => {
+    if (mythicCelebrationTimerRef.current !== null) {
+      window.clearTimeout(mythicCelebrationTimerRef.current)
+      mythicCelebrationTimerRef.current = null
+    }
+
+    setIsMythicAiThinking(false)
+    setShowMythicWinCelebration(false)
+    mythicDispatch({ type: 'NEW_GAME' })
+    navigate('/')
+  }, [navigate])
+
   const leaveCurrentLobbySessionIfNeeded = useCallback(async () => {
     if (!onlineSessionId) {
       return
@@ -2412,6 +2631,11 @@ function App() {
 
   const handleSelectHomeStartMode = useCallback(
     (nextMode: HomeStartMode) => {
+      if (selectedGame.slug === 'mythic-reveal' && nextMode !== 'INSTANT') {
+        setHomeModeHint('Mythic Reveal currently supports Instant Adventure only.')
+        return
+      }
+
       if (nextMode === 'ONLINE' && !multiplayerEligibility.eligible) {
         setHomeModeHint('Log in to play Online Match against other users.')
         return
@@ -2450,6 +2674,7 @@ function App() {
     [
       clearOnlineContextForOfflineStart,
       multiplayerEligibility.eligible,
+      selectedGame.slug,
       setMatchStartStateTracked,
     ],
   )
@@ -3170,6 +3395,15 @@ function App() {
     )
   }
 
+  if (isMythicRevealHowToPlayPath) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <MythicRevealHowToPlayPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
   if (isHowToPlayPath) {
     return (
       <div className="flex min-h-screen flex-col">
@@ -3328,6 +3562,37 @@ function App() {
     )
   }
 
+  if (isMythicRevealRoute && !authoritativeMythicState.started) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <div className="mx-auto flex w-full max-w-4xl flex-1 items-center p-6">
+          <section className="w-full rounded-2xl border border-slate-700 bg-slate-950/80 p-6 text-slate-100">
+            <p className="text-sm uppercase tracking-wide text-cyan-300">Dice Odysseys</p>
+            <h1 className="mt-1 text-3xl font-bold text-cyan-100">Mythic Reveal</h1>
+            <p className="mt-2 text-sm text-slate-300">
+              Choose Instant Adventure on the home screen, then launch your prophecy duel.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Link
+                to="/"
+                className="rounded-md bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+              >
+                Go to Home Launcher
+              </Link>
+              <Link
+                to="/games/mythic-reveal/how-to-play"
+                className="rounded-md border border-slate-500 px-4 py-2 text-sm font-semibold text-slate-100"
+              >
+                Read How to Play
+              </Link>
+            </div>
+          </section>
+        </div>
+        <AppFooter />
+      </div>
+    )
+  }
+
   if (pathname === '/') {
     return (
       <div className="flex min-h-screen flex-col">
@@ -3408,15 +3673,11 @@ function App() {
                     >
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-sm font-semibold">{game.name}</p>
-                        <span
-                          className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                            isActive
-                              ? 'border-emerald-300/80 text-emerald-100'
-                              : 'border-amber-300/80 text-amber-100'
-                          }`}
-                        >
-                          {isActive ? 'Live' : 'Coming Soon'}
-                        </span>
+                        {!isActive ? (
+                          <span className="rounded border border-amber-300/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-100">
+                            Coming Soon
+                          </span>
+                        ) : null}
                       </div>
                       <p className="mt-1 text-xs">{game.summary}</p>
                     </button>
@@ -3453,7 +3714,7 @@ function App() {
                     : 'border-slate-400/70 bg-slate-900/60 text-slate-100'
                 }`}
                 onClick={() => handleSelectHomeStartMode('HOTSEAT')}
-                disabled={selectedGame.status !== 'active'}
+                disabled={selectedGame.status !== 'active' || !hotseatModeAllowedForSelectedGame}
               >
                 <p className="text-sm font-semibold">Hotseat Multiplayer</p>
                 <p className="mt-1 text-xs">Local turn-by-turn multiplayer.</p>
@@ -3487,20 +3748,27 @@ function App() {
                 {selectedGame.name} is coming soon. Select Space Race to play now.
               </p>
             )}
+            {selectedGame.status === 'active' && !hotseatModeAllowedForSelectedGame && (
+              <p className="mt-2 rounded-md border border-cyan-400/50 bg-cyan-950/30 px-2 py-1.5 text-xs text-cyan-100">
+                Mythic Reveal currently supports Instant Adventure only.
+              </p>
+            )}
           </section>
           {selectedGame.status === 'active' && homeStartMode === 'INSTANT' && (
             <section className="grid gap-3 lg:grid-cols-4">
-              <label className="flex flex-col gap-1 text-sm text-slate-200">
-                AI Difficulty
-                <select
-                  className="rounded-md border border-slate-600 bg-slate-900 p-2"
-                  value={difficulty}
-                  onChange={(event) => setDifficulty(event.target.value as Difficulty)}
-                >
-                  <option value="easy">Easy</option>
-                  <option value="medium">Medium</option>
-                </select>
-              </label>
+              {selectedGame.slug !== 'mythic-reveal' && (
+                <label className="flex flex-col gap-1 text-sm text-slate-200">
+                  AI Difficulty
+                  <select
+                    className="rounded-md border border-slate-600 bg-slate-900 p-2"
+                    value={difficulty}
+                    onChange={(event) => setDifficulty(event.target.value as Difficulty)}
+                  >
+                    <option value="easy">Easy</option>
+                    <option value="medium">Medium</option>
+                  </select>
+                </label>
+              )}
 
               <label className="flex flex-col gap-1 text-sm text-slate-200">
                 Your Name
@@ -3511,22 +3779,38 @@ function App() {
                 />
               </label>
 
-              <label className="flex flex-col gap-1 text-sm text-slate-200">
-                AI Opponents
-                <select
-                  className="rounded-md border border-slate-600 bg-slate-900 p-2"
-                  value={aiCount}
-                  onChange={(event) => setAiCount(Number(event.target.value))}
-                >
-                  <option value={1}>1</option>
-                  <option value={2}>2</option>
-                  <option value={3}>3</option>
-                </select>
-              </label>
+              {selectedGame.slug !== 'mythic-reveal' && (
+                <label className="flex flex-col gap-1 text-sm text-slate-200">
+                  AI Opponents
+                  <select
+                    className="rounded-md border border-slate-600 bg-slate-900 p-2"
+                    value={aiCount}
+                    onChange={(event) => setAiCount(Number(event.target.value))}
+                  >
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                    <option value={3}>3</option>
+                  </select>
+                </label>
+              )}
+
+              {selectedGame.slug === 'mythic-reveal' && (
+                <label className="flex flex-col gap-1 text-sm text-slate-200">
+                  Rival Profile
+                  <select
+                    className="rounded-md border border-slate-600 bg-slate-900 p-2"
+                    value={mythicAiProfile}
+                    onChange={(event) => setMythicAiProfile(event.target.value as MythicRevealAiProfile)}
+                  >
+                    <option value="circe">Circe</option>
+                    <option value="poly">Poly</option>
+                  </select>
+                </label>
+              )}
             </section>
           )}
 
-          {selectedGame.status === 'active' && homeStartMode === 'HOTSEAT' && (
+          {selectedGame.status === 'active' && hotseatModeAllowedForSelectedGame && homeStartMode === 'HOTSEAT' && (
             <section className="grid gap-3 lg:grid-cols-4">
               <label className="flex flex-col gap-1 text-sm text-slate-200">
                 Players
@@ -3885,6 +4169,26 @@ function App() {
           prefersReducedMotion={prefersReducedMotion}
         />
       </>
+    )
+  }
+
+  if (isMythicRevealRoute) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <MythicRevealPage
+          state={authoritativeMythicState}
+          showWinCelebration={showMythicWinCelebration}
+          prefersReducedMotion={prefersReducedMotion}
+          winConfetti={humanWinConfetti}
+          isAiThinking={isMythicAiThinking}
+          onRoll={handleMythicRoll}
+          onReveal={handleMythicReveal}
+          onSabotage={handleMythicSabotage}
+          onEndTurn={handleMythicEndTurn}
+          onNewGame={handleMythicNewGame}
+        />
+        <AppFooter />
+      </div>
     )
   }
 

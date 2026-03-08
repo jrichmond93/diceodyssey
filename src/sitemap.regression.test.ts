@@ -6,7 +6,7 @@ const loadSitemapXml = (): string =>
   readFileSync(resolve(process.cwd(), 'public/sitemap.xml'), 'utf8')
 
 describe('sitemap regression coverage', () => {
-  it('includes active game and how-to-play routes for SEO crawl discovery', () => {
+  it('includes key game and how-to-play routes for SEO crawl discovery', () => {
     const sitemap = loadSitemapXml()
 
     const requiredUrls = [
@@ -14,7 +14,9 @@ describe('sitemap regression coverage', () => {
       'https://diceodysseys.com/games/space-race',
       'https://diceodysseys.com/games/space-race/how-to-play',
       'https://diceodysseys.com/games/voyage-home',
+      'https://diceodysseys.com/games/mythic-reveal',
       'https://diceodysseys.com/games/voyage-home/how-to-play',
+      'https://diceodysseys.com/games/mythic-reveal/how-to-play',
     ]
 
     requiredUrls.forEach((url) => {

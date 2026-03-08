@@ -4,6 +4,7 @@ import { GAME_CATALOG } from '../data/games'
 const GUIDE_PATH_BY_GAME_SLUG: Record<string, string> = {
   'space-race': '/games/space-race/how-to-play',
   'voyage-home': '/games/voyage-home/how-to-play',
+  'mythic-reveal': '/games/mythic-reveal/how-to-play',
 }
 
 export function HowToPlayPage() {
@@ -49,15 +50,11 @@ export function HowToPlayPage() {
               <article key={game.slug} className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-cyan-200">{game.name}</h3>
-                  <span
-                    className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                      game.status === 'active'
-                        ? 'border-emerald-300/80 text-emerald-100'
-                        : 'border-amber-300/80 text-amber-100'
-                    }`}
-                  >
-                    {game.status === 'active' ? 'Live' : 'Coming Soon'}
-                  </span>
+                  {game.status !== 'active' ? (
+                    <span className="rounded border border-amber-300/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-100">
+                      Coming Soon
+                    </span>
+                  ) : null}
                 </div>
                 <p className="mt-1 text-sm text-slate-300">{game.summary}</p>
                 <div className="mt-3">
