@@ -15,15 +15,15 @@ export const GAME_CATALOG: ReadonlyArray<GameCatalogEntry> = [
     status: 'active',
   },
   {
+    slug: 'voyage-home',
+    name: 'Voyage Home',
+    summary: 'Pig-style sea race with curses, sudden death, and deterministic AI captains.',
+    status: 'active',
+  },
+  {
     slug: 'nebula-heist',
     name: 'Nebula Heist',
     summary: 'Coming soon: coordinated raids across unstable sectors.',
-    status: 'coming-soon',
-  },
-  {
-    slug: 'asteroid-siege',
-    name: 'Asteroid Siege',
-    summary: 'Coming soon: hold asteroid outposts under pressure.',
     status: 'coming-soon',
   },
 ]

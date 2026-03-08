@@ -4,13 +4,29 @@ import { methodNotAllowed, readJsonBody, sendJson } from '../_lib/http.js'
 import { getSupabaseAdminClient } from '../_lib/supabase.js'
 import { publishSessionRealtimeEventBestEffort } from '../_lib/realtime.js'
 import { mapSessionSnapshot, type SeatRow, type SessionRow } from '../_lib/sessionSnapshot.js'
-import { createHybridGameState } from '../_lib/serverGameState.js'
+import { createHybridGameState, createVoyageOnlineSeatState } from '../_lib/serverGameState.js'
 import { resolveUserProfileIdentity } from '../_lib/displayName.js'
 import { DEFAULT_PLAYER_AVATAR_KEY } from '../../src/multiplayer/avatarCatalog.js'
+import type { OnlineGameSlug } from '../../src/multiplayer/types.js'
+import type { VoyageHomeAiProfile } from '../../src/voyageHome/types.js'
+import { isMissingGameSlugColumnError } from '../_lib/gameSlugCompat.js'
 
 interface StartVsAiBody {
   aiSlug?: string
+  gameSlug?: OnlineGameSlug
 }
+
+const AI_SLUG_TO_VOYAGE_PROFILE: Record<string, VoyageHomeAiProfile> = {
+  zeus: 'posei',
+  odys: 'odys',
+  posey: 'posei',
+  posei: 'posei',
+  poly: 'poly',
+  polly: 'poly',
+}
+
+const resolveGameSlug = (value: unknown): OnlineGameSlug =>
+  value === 'voyage-home' ? 'voyage-home' : 'space-race'
 
 const getErrorDetail = (error: unknown): string => {
   if (error instanceof Error) {
@@ -72,6 +88,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const user = await verifyRequestUser(req)
     const body = await readJsonBody<StartVsAiBody>(req)
     const aiSlug = normalizeAiSlug(body.aiSlug)
+    const gameSlug = resolveGameSlug(body.gameSlug)
 
     const supabase = getSupabaseAdminClient()
     const identity = await resolveUserProfileIdentity(supabase, user)
@@ -95,32 +112,67 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const aiUserId = `ai|online-${sessionId}-${aiSlug}`
     const aiDisplayName = toAiDisplayName(aiSlug)
 
-    const nextGameState = createHybridGameState([
-      {
-        name: identity.displayName,
-        isAI: false,
-      },
-      {
-        name: aiDisplayName,
-        isAI: true,
-      },
-    ])
+    const nextGameState =
+      gameSlug === 'voyage-home'
+        ? createVoyageOnlineSeatState([
+            {
+              name: identity.displayName,
+              isAI: false,
+            },
+            {
+              name: aiDisplayName,
+              isAI: true,
+              aiProfile: AI_SLUG_TO_VOYAGE_PROFILE[aiSlug] ?? 'odys',
+            },
+          ])
+        : createHybridGameState([
+            {
+              name: identity.displayName,
+              isAI: false,
+            },
+            {
+              name: aiDisplayName,
+              isAI: true,
+            },
+          ])
 
-    const sessionInsert = await supabase
+    let sessionInsert = await supabase
       .from('dice_sessions')
       .insert({
         id: sessionId,
+        game_slug: gameSlug,
         status: 'active',
         version: 1,
         game_state: nextGameState,
         created_at: now,
         updated_at: now,
       })
+
+    if (sessionInsert.error && isMissingGameSlugColumnError(sessionInsert.error)) {
+      sessionInsert = await supabase
+        .from('dice_sessions')
+        .insert({
+          id: sessionId,
+          status: 'active',
+          version: 1,
+          game_state: nextGameState,
+          created_at: now,
+          updated_at: now,
+        })
+    }
+
+    if (sessionInsert.error) {
+      throw sessionInsert.error
+    }
+
+    const sessionRead = await supabase
+      .from('dice_sessions')
       .select('id, version, status, game_state, created_at, updated_at')
+      .eq('id', sessionId)
       .single()
 
-    if (sessionInsert.error || !sessionInsert.data) {
-      throw sessionInsert.error ?? new Error('SESSION_INSERT_FAILED')
+    if (sessionRead.error || !sessionRead.data) {
+      throw sessionRead.error ?? new Error('SESSION_READ_FAILED')
     }
 
     const seatInsert = await supabase.from('dice_player_seats').insert([
@@ -171,7 +223,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     ]
 
-    const snapshot = mapSessionSnapshot(sessionInsert.data as SessionRow, seats)
+    const snapshot = mapSessionSnapshot({
+      ...(sessionRead.data as SessionRow),
+      game_slug: gameSlug,
+    }, seats)
 
     await publishSessionRealtimeEventBestEffort(sessionId, {
       type: 'MATCH_FOUND',
@@ -187,6 +242,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       started: true,
       sessionId,
       aiSlug,
+      gameSlug,
     })
   } catch (error) {
     if (error instanceof Error && error.message === 'UNAUTHORIZED') {

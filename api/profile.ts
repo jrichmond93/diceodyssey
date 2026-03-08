@@ -18,6 +18,12 @@ interface ProfileBody {
   avatarKey?: string
 }
 
+interface ExistingProfileRow {
+  display_name: string | null
+  avatar_key?: string | null
+  updated_at?: string | null
+}
+
 type SupabaseLikeError = {
   code?: string
   message?: string
@@ -89,7 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('user_id', user.userId)
         .maybeSingle()
 
-      let existingProfile = existingProfileResult.data
+      let existingProfile: ExistingProfileRow | null = existingProfileResult.data as ExistingProfileRow | null
       let existingProfileError = existingProfileResult.error
 
       if (isMissingColumnError(existingProfileResult.error)) {
@@ -99,7 +105,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .eq('user_id', user.userId)
           .maybeSingle()
 
-        existingProfile = legacyResult.data
+        existingProfile = legacyResult.data as ExistingProfileRow | null
         existingProfileError = legacyResult.error
       }
 

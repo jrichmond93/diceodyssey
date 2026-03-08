@@ -3,9 +3,10 @@ import { verifyRequestUser } from '../../_lib/auth.js'
 import { methodNotAllowed, readJsonBody, sendJson } from '../../_lib/http.js'
 import { getSupabaseAdminClient } from '../../_lib/supabase.js'
 import { publishSessionRealtimeEventBestEffort } from '../../_lib/realtime.js'
-import { createHotseatGameState } from '../../_lib/serverGameState.js'
+import { createGameAwareHotseatState } from '../../_lib/serverGameState.js'
 import { mapSessionSnapshot, type SeatRow, type SessionRow } from '../../_lib/sessionSnapshot.js'
 import { resolveUserProfileIdentity } from '../../_lib/displayName.js'
+import { resolveSessionGameSlug } from '../../_lib/gameSlugCompat.js'
 
 interface PartyInviteRespondBody {
   inviteId?: string
@@ -98,7 +99,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const sessionResult = await supabase
       .from('dice_sessions')
-      .select('id, status')
+      .select('id, status, game_state')
       .eq('id', sessionId)
       .maybeSingle()
 
@@ -176,7 +177,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (sessionResult.data.status === 'lobby' && (seatsForInit?.length ?? 0) >= 2) {
       const humanNames = (seatsForInit ?? []).map((seat) => seat.display_name)
-      const initializedState = createHotseatGameState(humanNames)
+      const initializedState = createGameAwareHotseatState(resolveSessionGameSlug(sessionResult.data), humanNames)
 
       const updateResult = await supabase
         .from('dice_sessions')

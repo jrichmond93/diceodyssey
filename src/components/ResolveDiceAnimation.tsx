@@ -16,19 +16,35 @@ interface AnimatedDie {
 interface ResolveDiceAnimationProps {
   active: boolean
   playerName?: string
-  variant?: 'rolling' | 'skip'
+  variant?: 'rolling' | 'skip' | 'shipwreck'
   prefersReducedMotion?: boolean
+  diceCount?: number
+  resolvedValues?: number[]
+  fixedColor?: Color
 }
 
-const buildFrame = (): AnimatedDie[] =>
-  Array.from({ length: 6 }, (_, index) => ({
+const clampDiceCount = (count: number): number => Math.min(6, Math.max(1, Math.floor(count)))
+
+const buildFrame = (diceCount: number, fixedColor?: Color): AnimatedDie[] =>
+  Array.from({ length: clampDiceCount(diceCount) }, (_, index) => ({
     id: `anim-die-${index}`,
-    color: randomColor(),
+    color: fixedColor ?? randomColor(),
     value: randomFace(),
   }))
 
-export function ResolveDiceAnimation({ active, playerName, variant = 'rolling', prefersReducedMotion }: ResolveDiceAnimationProps) {
-  const [frame, setFrame] = useState<AnimatedDie[]>(() => buildFrame())
+export function ResolveDiceAnimation({
+  active,
+  playerName,
+  variant = 'rolling',
+  prefersReducedMotion,
+  diceCount = 6,
+  resolvedValues,
+  fixedColor,
+}: ResolveDiceAnimationProps) {
+  const resolvedDiceCount = clampDiceCount(diceCount)
+  const [frame, setFrame] = useState<AnimatedDie[]>(() => buildFrame(resolvedDiceCount, fixedColor))
+  const hasResolvedValues = Boolean(resolvedValues && resolvedValues.length > 0)
+  const resolvedValuesKey = (resolvedValues ?? []).join(',')
 
   const frameIntervalMs = prefersReducedMotion ? 220 : 110
 
@@ -37,18 +53,29 @@ export function ResolveDiceAnimation({ active, playerName, variant = 'rolling', 
       return
     }
 
+    if (hasResolvedValues) {
+      const frozen = Array.from({ length: resolvedDiceCount }, (_, index) => ({
+        id: `anim-die-${index}`,
+        color: fixedColor ?? ('blue' as const),
+        value: resolvedValues?.[index] ?? resolvedValues?.[resolvedValues.length - 1] ?? 1,
+      }))
+
+      setFrame(frozen)
+      return
+    }
+
     const immediate = window.setTimeout(() => {
-      setFrame(buildFrame())
+      setFrame(buildFrame(resolvedDiceCount, fixedColor))
     }, 0)
     const timer = window.setInterval(() => {
-      setFrame(buildFrame())
+      setFrame(buildFrame(resolvedDiceCount, fixedColor))
     }, frameIntervalMs)
 
     return () => {
       window.clearTimeout(immediate)
       window.clearInterval(timer)
     }
-  }, [active, frameIntervalMs, variant])
+  }, [active, fixedColor, frameIntervalMs, hasResolvedValues, resolvedDiceCount, resolvedValues, resolvedValuesKey, variant])
 
   const containerClass = useMemo(() => {
     if (!active) {
@@ -58,6 +85,9 @@ export function ResolveDiceAnimation({ active, playerName, variant = 'rolling', 
     return 'opacity-100'
   }, [active])
 
+  const shipwreckFacePath = getDieFaceAssetPath('red', 1)
+  const shipwreckFallbackPath = getDieColorFallbackAssetPath('red')
+
   return (
     <div className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 transition-opacity ${containerClass}`}>
       <div className="rounded-xl border border-cyan-400/50 bg-slate-900/95 p-4 shadow-xl">
@@ -66,10 +96,46 @@ export function ResolveDiceAnimation({ active, playerName, variant = 'rolling', 
             <p className="text-sm font-semibold text-amber-100">{playerName ?? 'Current Player'} · No Dice, skipping turn...</p>
             <p className="text-xs text-slate-300">Applying skip effects and advancing to the next captain.</p>
           </div>
+        ) : variant === 'shipwreck' ? (
+          <div className="flex flex-col items-center gap-3 px-4 py-3 text-center">
+            <img
+              src={shipwreckFacePath ?? shipwreckFallbackPath}
+              alt="Shipwreck warning icon"
+              className="h-14 w-14 rounded border border-rose-300/70 object-cover shadow-[0_0_18px_rgba(244,63,94,0.35)]"
+              loading="lazy"
+              onError={(event) => {
+                const target = event.currentTarget
+                if (target.src.endsWith(shipwreckFallbackPath)) {
+                  return
+                }
+
+                target.src = shipwreckFallbackPath
+              }}
+            />
+            <p className="text-base font-bold text-rose-100">{playerName ?? 'Captain'} shipwrecked!</p>
+            <p className="text-xs text-rose-200">Turn lost. Passing the helm to the next captain.</p>
+          </div>
         ) : (
           <>
-            <p className="mb-3 text-center text-sm font-semibold text-cyan-100">{playerName ?? 'Current Player'} Rolling Dice...</p>
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+            <p className="mb-3 text-center text-sm font-semibold text-cyan-100">
+              {playerName ?? 'Current Player'} {hasResolvedValues ? 'Rolled' : resolvedDiceCount === 1 ? 'Rolling Die...' : 'Rolling Dice...'}
+            </p>
+            {hasResolvedValues && (
+              <p className="mb-2 text-center text-xs text-cyan-200">
+                Result: {(resolvedValues ?? []).join(', ')}
+              </p>
+            )}
+            <div
+              className={`grid gap-2 ${
+                resolvedDiceCount === 1
+                  ? 'grid-cols-1 justify-items-center'
+                  : resolvedDiceCount <= 2
+                    ? 'grid-cols-2 justify-items-center'
+                  : resolvedDiceCount <= 4
+                    ? 'grid-cols-2 sm:grid-cols-4 justify-items-center'
+                    : 'grid-cols-3 sm:grid-cols-6 justify-items-center'
+              }`}
+            >
               {frame.map((die) => {
                 const facePath = getDieFaceAssetPath(die.color, die.value)
                 const fallbackPath = getDieColorFallbackAssetPath(die.color)

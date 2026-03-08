@@ -1,6 +1,7 @@
 import type { Allocation, GameState } from '../types.js'
 
 export type SessionStatus = 'lobby' | 'active' | 'finished' | 'abandoned'
+export type OnlineGameSlug = 'space-race' | 'voyage-home'
 
 export type MatchStatus = 'lobby' | 'in_progress' | 'between_games' | 'closed'
 
@@ -17,6 +18,7 @@ export interface SessionPlayerSeat {
 
 export interface SessionSnapshot {
   sessionId: string
+  gameSlug: OnlineGameSlug
   version: number
   status: SessionStatus
   gameState: GameState

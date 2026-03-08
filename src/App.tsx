@@ -5,19 +5,27 @@ import { TouchBackend } from 'react-dnd-touch-backend'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth0 } from '@auth0/auth0-react'
 import { AppFooter } from './components/AppFooter'
+import { ResolveDiceAnimation } from './components/ResolveDiceAnimation'
 import { AboutPage } from './pages/AboutPage'
 import { ContactPage } from './pages/ContactPage'
 import { FAQ_ITEMS, FaqPage } from './pages/FaqPage'
+import { HowToPlayPage } from './pages/HowToPlayPage'
 import { LegalPage } from './pages/LegalPage'
 import { OpponentBioPage } from './pages/OpponentBioPage'
 import { OpponentsPage } from './pages/OpponentsPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { SpaceRacePage } from './pages/SpaceRacePage'
 import { SpaceRaceHowToPlayPage } from './pages/SpaceRaceHowToPlayPage'
+import { VoyageHomeHowToPlayPage } from './pages/VoyageHomeHowToPlayPage'
+import { VoyageHomePage } from './pages/VoyageHomePage'
 import { emptyAllocation, gameReducer, initialGameState } from './reducers/gameReducer'
 import type { Allocation, Difficulty, GameMode, GameState, TurnResolutionPlaybackStage } from './types'
 import { AI_CHARACTERS, findAICharacterBySlug, OPPONENT_THUMBNAIL_FALLBACK_SRC } from './data/aiCharacters'
 import { findGameBySlug, GAME_CATALOG, SPACE_RACE_GAME } from './data/games'
+import { chooseVoyageHomeAction } from './voyageHome/ai'
+import { DEFAULT_TARGET_LEAGUES } from './voyageHome/constants'
+import { initialVoyageHomeState, voyageHomeReducer } from './voyageHome/reducer'
+import type { VoyageHomeAiProfile, VoyageHomeState } from './voyageHome/types'
 import { buildPostGameNarrative } from './utils/buildPostGameNarrative'
 import { preloadDiceAnimationAssets } from './utils/dieAssets'
 import { loadHomeLaunchState, saveHomeLaunchState } from './utils/homeLaunchState'
@@ -37,6 +45,10 @@ import type { RealtimeEvent, SessionLifecycleAck, SessionSnapshot, TurnAck } fro
 
 const HELP_STORAGE_KEY = 'dice-odysseys-help-open'
 const AI_THINK_DELAY_MS = 600
+const VOYAGE_AI_THINK_DELAY_MS = 500
+const VOYAGE_ROLL_SPIN_MS = 900
+const VOYAGE_ROLL_RESULT_REVEAL_MS = 1400
+const VOYAGE_SHIPWRECK_REVEAL_MS = 2000
 const RESOLVE_STAGE_DELAY_MS = 240
 const REDUCED_MOTION_STAGE_DELAY_MS = 80
 const REDUCED_MOTION_AI_DELAY_MS = 200
@@ -141,9 +153,19 @@ const homeTestimonials = [
 ]
 
 type ResolveAnimationVariant = 'rolling' | 'skip'
+type VoyageRollDieColor = 'red' | 'blue' | 'green'
 type HomeStartMode = 'INSTANT' | 'HOTSEAT' | 'ONLINE'
 type OnlineWaitState = 'IDLE' | 'WAITING_PRIMARY' | 'WAITING_DECISION'
 type HybridSeatMode = 'auto' | 'human' | 'ai'
+
+const AI_SLUG_TO_VOYAGE_PROFILE: Record<string, VoyageHomeAiProfile> = {
+  zeus: 'posei',
+  posey: 'posei',
+  posei: 'posei',
+  odys: 'odys',
+  poly: 'poly',
+  polly: 'poly',
+}
 type MatchStartState =
   | 'IDLE'
   | 'LOCKING_PLAN'
@@ -271,6 +293,22 @@ const isGameStateLike = (value: unknown): value is GameState => {
   )
 }
 
+const isVoyageHomeStateLike = (value: unknown): value is VoyageHomeState => {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const candidate = value as Partial<VoyageHomeState>
+  return (
+    typeof candidate.started === 'boolean' &&
+    typeof candidate.turn === 'number' &&
+    typeof candidate.round === 'number' &&
+    Array.isArray(candidate.players) &&
+    typeof candidate.currentPlayerIndex === 'number' &&
+    typeof candidate.targetLeagues === 'number'
+  )
+}
+
 const buildDefaultHotseatNames = (count: number): string =>
   Array.from({ length: count }, (_, index) => `Capt${index + 1}`).join(', ')
 
@@ -297,10 +335,13 @@ function App() {
   const location = useLocation()
   const pathname = getNormalizedPathname(location.pathname)
   const isSpaceRaceHowToPlayPath = pathname === `/games/${SPACE_RACE_GAME.slug}/how-to-play`
+  const isVoyageHomeHowToPlayPath = pathname === '/games/voyage-home/how-to-play'
+  const isHowToPlayPath = pathname === '/how-to-play'
   const opponentBioSlug = getOpponentBioSlug(pathname)
   const gameSlugFromPath = getGameSlugFromPath(pathname)
   const persistedLauncherState = useMemo(() => loadHomeLaunchState(), [])
   const [state, dispatch] = useReducer(gameReducer, initialGameState)
+  const [voyageState, voyageDispatch] = useReducer(voyageHomeReducer, initialVoyageHomeState)
   const [selectedGameSlug, setSelectedGameSlug] = useState<string>(persistedLauncherState.selectedGameSlug)
   const [mode, setMode] = useState<GameMode>(persistedLauncherState.mode)
   const [homeStartMode, setHomeStartMode] = useState<HomeStartMode>(persistedLauncherState.homeStartMode)
@@ -320,6 +361,7 @@ function App() {
   const [resolveAnimationVariant, setResolveAnimationVariant] = useState<ResolveAnimationVariant>('rolling')
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
   const [showHumanWinCelebration, setShowHumanWinCelebration] = useState(false)
+  const [showVoyageWinCelebration, setShowVoyageWinCelebration] = useState(false)
   const [onlineSessionId, setOnlineSessionId] = useState<string | null>(null)
   const [onlineJoinSessionId, setOnlineJoinSessionId] = useState('')
   const [onlineSnapshot, setOnlineSnapshot] = useState<SessionSnapshot | null>(null)
@@ -336,6 +378,15 @@ function App() {
   const [hybridSlotPlan] = useState<HybridSeatMode[]>(['auto', 'auto', 'auto'])
   const [profileDisplayName, setProfileDisplayName] = useState<string | null>(null)
   const [presenceSnapshot, setPresenceSnapshot] = useState<PresenceSnapshotPayload | null>(null)
+  const [isVoyageAiThinking, setIsVoyageAiThinking] = useState(false)
+  const [isVoyageRollAnimating, setIsVoyageRollAnimating] = useState(false)
+  const [voyageRollAnimationPlayerName, setVoyageRollAnimationPlayerName] = useState<string | undefined>(undefined)
+  const [voyageRollAnimationPlayerId, setVoyageRollAnimationPlayerId] = useState<string | undefined>(undefined)
+  const [voyageRollAnimationDieColor, setVoyageRollAnimationDieColor] = useState<VoyageRollDieColor>('blue')
+  const [isVoyageShipwreckAnimating, setIsVoyageShipwreckAnimating] = useState(false)
+  const [voyageShipwreckPlayerName, setVoyageShipwreckPlayerName] = useState<string | undefined>(undefined)
+  const [voyageAiTurnGate, setVoyageAiTurnGate] = useState(false)
+  const [voyageAutoPlayAiTurns, setVoyageAutoPlayAiTurns] = useState(false)
 
   const auth0Audience = useMemo(() => {
     try {
@@ -362,12 +413,19 @@ function App() {
   }, [getAccessTokenSilently, auth0Audience])
 
   const resolutionTimersRef = useRef<number[]>([])
+  const voyageRollTimersRef = useRef<number[]>([])
+  const voyageShipwreckTimerRef = useRef<number | null>(null)
   const celebrationTimerRef = useRef<number | null>(null)
+  const voyageCelebrationTimerRef = useRef<number | null>(null)
   const onlineRealtimeRef = useRef<SessionRealtimeController | null>(null)
   const onlineSessionGuardRef = useRef<string | null>(null)
   const onlineLobbyBootstrappingRef = useRef(false)
   const matchStartStateRef = useRef<MatchStartState>('IDLE')
   const hotseatCountInitializedRef = useRef(false)
+  const lastVoyageTurnRef = useRef<{ turn: number; playerId?: string } | null>(null)
+  const lastVoyageShipwreckKeyRef = useRef<string | null>(null)
+  const voyageLobbyOpenedTrackedRef = useRef(false)
+  const voyageStartClickedAtRef = useRef<number | null>(null)
   const [helpOpen, setHelpOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
       return false
@@ -377,12 +435,23 @@ function App() {
   })
 
   const authoritativeState =
-    onlineSnapshot && isGameStateLike(onlineSnapshot.gameState) ? onlineSnapshot.gameState : state
+    onlineSnapshot?.gameSlug === 'space-race' && isGameStateLike(onlineSnapshot.gameState)
+      ? onlineSnapshot.gameState
+      : state
+  const authoritativeVoyageState =
+    onlineSnapshot?.gameSlug === 'voyage-home' && isVoyageHomeStateLike(onlineSnapshot.gameState)
+      ? onlineSnapshot.gameState
+      : voyageState
   const selectedGame = findGameBySlug(selectedGameSlug) ?? SPACE_RACE_GAME
   const routedGame = gameSlugFromPath ? findGameBySlug(gameSlugFromPath) : undefined
   const isSpaceRaceRoute = gameSlugFromPath === SPACE_RACE_GAME.slug
+  const isVoyageHomeRoute = gameSlugFromPath === 'voyage-home'
+  const onlineModeAllowedForSelectedGame =
+    selectedGame.slug === SPACE_RACE_GAME.slug || selectedGame.slug === 'voyage-home'
   const isOnlineMode = Boolean(onlineSessionId)
   const currentPlayer = authoritativeState.players[authoritativeState.currentPlayerIndex]
+  const voyageCurrentPlayer =
+    authoritativeVoyageState.players[authoritativeVoyageState.currentPlayerIndex]
   const resolveStageDelay = prefersReducedMotion ? REDUCED_MOTION_STAGE_DELAY_MS : RESOLVE_STAGE_DELAY_MS
   const aiThinkDelay = prefersReducedMotion ? REDUCED_MOTION_AI_DELAY_MS : AI_THINK_DELAY_MS
   const isResolving = authoritativeState.turnResolution.active || onlineSubmitting
@@ -465,6 +534,24 @@ function App() {
         }
       }
 
+      if (isHowToPlayPath) {
+        return {
+          title: 'How to Play | Dice Odysseys',
+          description:
+            'Learn Dice Odysseys basics and access game-specific guides for Space Race and Voyage Home.',
+          path: '/how-to-play',
+        }
+      }
+
+      if (isVoyageHomeHowToPlayPath) {
+        return {
+          title: 'How to Play Voyage Home | Dice Odysseys',
+          description:
+            'Learn Voyage Home rules, curse flow, turn strategy, and sudden-death tie handling in the complete How to Play guide.',
+          path: '/games/voyage-home/how-to-play',
+        }
+      }
+
       if (pathname === '/opponents') {
         return {
           title: 'Opponents | Dice Odysseys',
@@ -516,6 +603,15 @@ function App() {
           description:
             'Play Space Race, the current Dice Odysseys game mode: allocate dice to move, claim, and sabotage in solo and online matches.',
           path: `/games/${SPACE_RACE_GAME.slug}`,
+        }
+      }
+
+      if (gameSlug === 'voyage-home') {
+        return {
+          title: 'Voyage Home | Dice Odysseys',
+          description:
+            `Play Voyage Home: a risk-driven sea race where captains roll, hold, and curse leaders to reach ${DEFAULT_TARGET_LEAGUES} leagues first.`,
+          path: '/games/voyage-home',
         }
       }
 
@@ -602,11 +698,16 @@ function App() {
 
     upsertJsonLdScript(
       'videogame',
-      pathname === '/' || gameSlug === SPACE_RACE_GAME.slug
+      pathname === '/' || gameSlug === SPACE_RACE_GAME.slug || gameSlug === 'voyage-home'
         ? {
             '@context': 'https://schema.org',
             '@type': 'VideoGame',
-            name: gameSlug === SPACE_RACE_GAME.slug ? 'Space Race' : 'Dice Odysseys',
+            name:
+              gameSlug === SPACE_RACE_GAME.slug
+                ? 'Space Race'
+                : gameSlug === 'voyage-home'
+                  ? 'Voyage Home'
+                  : 'Dice Odysseys',
             url: SITE_ORIGIN,
             image: socialImage,
             description: seo.description,
@@ -658,6 +759,21 @@ function App() {
         ]
       }
 
+      if (isHowToPlayPath) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'How to Play', path: '/how-to-play' },
+        ]
+      }
+
+      if (isVoyageHomeHowToPlayPath) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Voyage Home', path: '/games/voyage-home' },
+          { name: 'How to Play', path: '/games/voyage-home/how-to-play' },
+        ]
+      }
+
       if (pathname === '/opponents') {
         return [
           { name: 'Home', path: '/' },
@@ -705,6 +821,13 @@ function App() {
         ]
       }
 
+      if (gameSlug === 'voyage-home') {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Voyage Home', path: '/games/voyage-home' },
+        ]
+      }
+
       return []
     })()
 
@@ -723,7 +846,7 @@ function App() {
           }
         : null,
     )
-  }, [isSpaceRaceHowToPlayPath, pathname, opponentBioSlug])
+  }, [isSpaceRaceHowToPlayPath, isVoyageHomeHowToPlayPath, isHowToPlayPath, pathname, opponentBioSlug])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -752,9 +875,64 @@ function App() {
 
   useEffect(() => {
     return () => {
+      voyageRollTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+      voyageRollTimersRef.current = []
+
+      if (voyageShipwreckTimerRef.current !== null) {
+        window.clearTimeout(voyageShipwreckTimerRef.current)
+        voyageShipwreckTimerRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isVoyageHomeRoute || isVoyageRollAnimating || !voyageState.lastRoll?.busted) {
+      return
+    }
+
+    const marker = `${voyageState.lastRoll.playerId}:${voyageState.turn}:${voyageState.round}:${voyageState.log[0]?.id ?? 'none'}`
+    if (lastVoyageShipwreckKeyRef.current === marker) {
+      return
+    }
+
+    lastVoyageShipwreckKeyRef.current = marker
+
+    const bustedPlayer = voyageState.players.find((player) => player.id === voyageState.lastRoll?.playerId)
+    setVoyageShipwreckPlayerName(bustedPlayer?.name ?? 'Captain')
+    setIsVoyageShipwreckAnimating(true)
+
+    if (voyageShipwreckTimerRef.current !== null) {
+      window.clearTimeout(voyageShipwreckTimerRef.current)
+      voyageShipwreckTimerRef.current = null
+    }
+
+    const revealMs = prefersReducedMotion ? Math.floor(VOYAGE_SHIPWRECK_REVEAL_MS / 2) : VOYAGE_SHIPWRECK_REVEAL_MS
+    voyageShipwreckTimerRef.current = window.setTimeout(() => {
+      setIsVoyageShipwreckAnimating(false)
+      setVoyageShipwreckPlayerName(undefined)
+      voyageShipwreckTimerRef.current = null
+    }, revealMs)
+  }, [
+    isVoyageHomeRoute,
+    isVoyageRollAnimating,
+    prefersReducedMotion,
+    voyageState.lastRoll,
+    voyageState.log,
+    voyageState.players,
+    voyageState.round,
+    voyageState.turn,
+  ])
+
+  useEffect(() => {
+    return () => {
       if (celebrationTimerRef.current !== null) {
         window.clearTimeout(celebrationTimerRef.current)
         celebrationTimerRef.current = null
+      }
+
+      if (voyageCelebrationTimerRef.current !== null) {
+        window.clearTimeout(voyageCelebrationTimerRef.current)
+        voyageCelebrationTimerRef.current = null
       }
     }
   }, [])
@@ -779,6 +957,21 @@ function App() {
       hotseatNames,
     })
   }, [selectedGameSlug, homeStartMode, mode, difficulty, humanName, aiCount, hotseatCount, hotseatNames])
+
+  useEffect(() => {
+    if (pathname === '/' && selectedGameSlug === 'voyage-home') {
+      if (!voyageLobbyOpenedTrackedRef.current) {
+        trackUnifiedPlayEvent('voyage_home_lobby_opened', {
+          homeStartMode,
+          mode,
+        })
+        voyageLobbyOpenedTrackedRef.current = true
+      }
+      return
+    }
+
+    voyageLobbyOpenedTrackedRef.current = false
+  }, [homeStartMode, mode, pathname, selectedGameSlug, trackUnifiedPlayEvent])
 
   useEffect(() => {
     if (!hotseatCountInitializedRef.current) {
@@ -832,6 +1025,42 @@ function App() {
     () => authoritativeState.players.find((player) => player.id === authoritativeState.winnerId),
     [authoritativeState.players, authoritativeState.winnerId],
   )
+
+  const voyageWinnerPlayer = useMemo(
+    () => authoritativeVoyageState.players.find((player) => player.id === authoritativeVoyageState.winnerId),
+    [authoritativeVoyageState.players, authoritativeVoyageState.winnerId],
+  )
+
+  useEffect(() => {
+    if (!voyageState.winnerId) {
+      return
+    }
+
+    trackUnifiedPlayEvent('voyage_home_match_finished', {
+      winnerId: voyageState.winnerId,
+      rounds: voyageState.round,
+      turns: voyageState.turn,
+      suddenDeath: voyageState.suddenDeath.active,
+    })
+  }, [trackUnifiedPlayEvent, voyageState.round, voyageState.suddenDeath.active, voyageState.turn, voyageState.winnerId])
+
+  useEffect(() => {
+    if (voyageStartClickedAtRef.current === null || !voyageState.lastRoll) {
+      return
+    }
+
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    const durationMs = Math.max(0, Math.round(now - voyageStartClickedAtRef.current))
+
+    trackUnifiedPlayEvent('voyage_home_first_roll_resolved', {
+      durationMs,
+      rollValue: voyageState.lastRoll.value,
+      busted: voyageState.lastRoll.busted,
+      wasCurseStartRoll: voyageState.lastRoll.wasCurseStartRoll,
+    })
+
+    voyageStartClickedAtRef.current = null
+  }, [trackUnifiedPlayEvent, voyageState.lastRoll])
 
   const multiplayerIdentity = useMemo(
     () => mapAuthUserToMultiplayerIdentity((user ?? null) as AuthUserProfile | null),
@@ -1286,6 +1515,31 @@ function App() {
     }, celebrationStartDelay)
   }, [authoritativeState.winnerId, winnerPlayer, prefersReducedMotion])
 
+  useEffect(() => {
+    if (voyageCelebrationTimerRef.current !== null) {
+      window.clearTimeout(voyageCelebrationTimerRef.current)
+      voyageCelebrationTimerRef.current = null
+    }
+
+    if (!authoritativeVoyageState.winnerId || !voyageWinnerPlayer) {
+      setShowVoyageWinCelebration(false)
+      return
+    }
+
+    window.scrollTo({ top: 0, left: 0, behavior: prefersReducedMotion ? 'auto' : 'smooth' })
+
+    const celebrationStartDelay = prefersReducedMotion ? 0 : HUMAN_WIN_SCROLL_LEAD_MS
+    voyageCelebrationTimerRef.current = window.setTimeout(() => {
+      setShowVoyageWinCelebration(true)
+
+      const celebrationDuration = prefersReducedMotion ? HUMAN_WIN_REDUCED_MOTION_MS : HUMAN_WIN_CELEBRATION_MS
+      voyageCelebrationTimerRef.current = window.setTimeout(() => {
+        setShowVoyageWinCelebration(false)
+        voyageCelebrationTimerRef.current = null
+      }, celebrationDuration)
+    }, celebrationStartDelay)
+  }, [authoritativeVoyageState.winnerId, voyageWinnerPlayer, prefersReducedMotion])
+
   const currentRound = useMemo(() => {
     const playerCount = Math.max(authoritativeState.players.length, 1)
     return Math.floor((authoritativeState.turn - 1) / playerCount) + 1
@@ -1528,12 +1782,235 @@ function App() {
     aiThinkDelay,
   ])
 
+  useEffect(() => {
+    const playerId = voyageCurrentPlayer?.id
+
+    if (
+      isOnlineMode ||
+      !isVoyageHomeRoute ||
+      authoritativeVoyageState.mode !== 'single' ||
+      !authoritativeVoyageState.started ||
+      authoritativeVoyageState.winnerId ||
+      !playerId
+    ) {
+      setVoyageAiTurnGate(false)
+      lastVoyageTurnRef.current = null
+      return
+    }
+
+    const lastTurn = lastVoyageTurnRef.current
+    const changedTurn = lastTurn?.turn !== authoritativeVoyageState.turn || lastTurn?.playerId !== playerId
+
+    if (changedTurn) {
+      if (voyageCurrentPlayer.isAI && !voyageAutoPlayAiTurns) {
+        setVoyageAiTurnGate(true)
+      } else {
+        setVoyageAiTurnGate(false)
+      }
+    }
+
+    if (voyageAutoPlayAiTurns && voyageAiTurnGate) {
+      setVoyageAiTurnGate(false)
+    }
+
+    lastVoyageTurnRef.current = {
+      turn: authoritativeVoyageState.turn,
+      playerId,
+    }
+  }, [
+    authoritativeVoyageState.mode,
+    authoritativeVoyageState.started,
+    authoritativeVoyageState.turn,
+    authoritativeVoyageState.winnerId,
+    isOnlineMode,
+    isVoyageHomeRoute,
+    voyageAutoPlayAiTurns,
+    voyageCurrentPlayer,
+    voyageAiTurnGate,
+  ])
+
+  const runVoyageRollWithAnimation = useCallback((player?: {
+    id: string
+    name: string
+    isAI: boolean
+    isCurseStartRoll: boolean
+  }) => {
+    if (isVoyageRollAnimating) {
+      return
+    }
+
+    if (!animationEnabled) {
+      voyageDispatch({ type: 'ROLL_DIE' })
+      return
+    }
+
+    voyageRollTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    voyageRollTimersRef.current = []
+
+    setVoyageRollAnimationPlayerName(player?.name)
+    setVoyageRollAnimationPlayerId(player?.id)
+    setVoyageRollAnimationDieColor(
+      player?.isCurseStartRoll ? 'red' : player?.isAI ? 'green' : 'blue',
+    )
+    setIsVoyageRollAnimating(true)
+
+    const spinMs = prefersReducedMotion ? Math.floor(VOYAGE_ROLL_SPIN_MS / 2) : VOYAGE_ROLL_SPIN_MS
+    const revealMs = prefersReducedMotion
+      ? Math.floor(VOYAGE_ROLL_RESULT_REVEAL_MS / 2)
+      : VOYAGE_ROLL_RESULT_REVEAL_MS
+
+    voyageRollTimersRef.current.push(window.setTimeout(() => {
+      voyageDispatch({ type: 'ROLL_DIE' })
+      voyageRollTimersRef.current.push(window.setTimeout(() => {
+        setIsVoyageRollAnimating(false)
+        setVoyageRollAnimationPlayerName(undefined)
+        setVoyageRollAnimationPlayerId(undefined)
+        setVoyageRollAnimationDieColor('blue')
+        voyageRollTimersRef.current = []
+      }, revealMs))
+    }, spinMs))
+  }, [animationEnabled, isVoyageRollAnimating, prefersReducedMotion])
+
+  useEffect(() => {
+    if (
+      isOnlineMode ||
+      !isVoyageHomeRoute ||
+      !authoritativeVoyageState.started ||
+      authoritativeVoyageState.winnerId ||
+      !voyageCurrentPlayer?.isAI
+    ) {
+      setIsVoyageAiThinking(false)
+      return
+    }
+
+    if (voyageAiTurnGate || isVoyageRollAnimating) {
+      return
+    }
+
+    setIsVoyageAiThinking(true)
+    const timer = window.setTimeout(() => {
+      const action = chooseVoyageHomeAction(voyageCurrentPlayer, authoritativeVoyageState)
+      if (action === 'ROLL_DIE') {
+        runVoyageRollWithAnimation({
+          id: voyageCurrentPlayer.id,
+          name: voyageCurrentPlayer.name,
+          isAI: voyageCurrentPlayer.isAI,
+          isCurseStartRoll: voyageCurrentPlayer.pendingCurse && !voyageCurrentPlayer.curseStartResolvedThisTurn,
+        })
+      } else {
+        voyageDispatch({ type: action })
+      }
+      setIsVoyageAiThinking(false)
+    }, VOYAGE_AI_THINK_DELAY_MS)
+
+    return () => {
+      window.clearTimeout(timer)
+      setIsVoyageAiThinking(false)
+    }
+  }, [
+    authoritativeVoyageState,
+    isOnlineMode,
+    isVoyageHomeRoute,
+    isVoyageRollAnimating,
+    runVoyageRollWithAnimation,
+    voyageAiTurnGate,
+    voyageCurrentPlayer,
+  ])
+
+  const buildVoyageAiProfiles = (count: number): VoyageHomeAiProfile[] => {
+    const cycle: VoyageHomeAiProfile[] = ['odys', 'posei', 'poly']
+    return Array.from({ length: count }, (_, index) => cycle[index % cycle.length])
+  }
+
+  const buildVoyageAiProfilesForSelection = (
+    count: number,
+    selectedAiSlug?: string,
+  ): VoyageHomeAiProfile[] => {
+    const base = buildVoyageAiProfiles(count)
+    if (!selectedAiSlug || base.length === 0) {
+      return base
+    }
+
+    const mapped = AI_SLUG_TO_VOYAGE_PROFILE[selectedAiSlug.toLowerCase()]
+    if (!mapped) {
+      return base
+    }
+
+    base[0] = mapped
+    return base
+  }
+
+  const buildVoyageAiNamesForSelection = (count: number, selectedAiSlug?: string): string[] | undefined => {
+    if (!selectedAiSlug || count <= 0) {
+      return undefined
+    }
+
+    const selected = findAICharacterBySlug(selectedAiSlug)
+    const displayName = selected?.shortName?.trim()
+    if (!displayName) {
+      return undefined
+    }
+
+    const names = Array.from({ length: count }, () => '')
+    names[0] = displayName
+    return names
+  }
+
   const handleStart = () => {
-    if (selectedGame.slug !== SPACE_RACE_GAME.slug || selectedGame.status !== 'active') {
+    if (selectedGame.status !== 'active') {
       return
     }
 
     if (mode === 'multiplayer') {
+      return
+    }
+
+    if (selectedGame.slug === 'voyage-home') {
+      if (mode === 'hotseat') {
+        const parsed = hotseatNames
+          .split(',')
+          .map((name) => name.trim())
+          .filter(Boolean)
+          .slice(0, hotseatCount)
+
+        const names = Array.from({ length: hotseatCount }, (_, index) => parsed[index] || `Captain ${index + 1}`)
+
+        voyageDispatch({
+          type: 'INIT_VOYAGE_HOME',
+          payload: {
+            mode: 'hotseat',
+            humanNames: names,
+            targetLeagues: DEFAULT_TARGET_LEAGUES,
+            debugEnabled,
+          },
+        })
+
+        trackUnifiedPlayEvent('voyage_home_start_clicked', {
+          mode: 'hotseat',
+          playerCount: hotseatCount,
+        })
+        voyageStartClickedAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now()
+        navigate('/games/voyage-home')
+        return
+      }
+
+      const instantName = humanName.trim() || 'Captain'
+      voyageDispatch({
+        type: 'INIT_VOYAGE_HOME',
+        payload: {
+          mode: 'single',
+          humanNames: [instantName],
+          aiProfiles: buildVoyageAiProfiles(aiCount),
+          targetLeagues: DEFAULT_TARGET_LEAGUES,
+          debugEnabled,
+        },
+      })
+      trackUnifiedPlayEvent('voyage_home_start_clicked', {
+        mode: 'single',
+        aiCount,
+      })
+      voyageStartClickedAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now()
+      navigate('/games/voyage-home')
       return
     }
 
@@ -1578,6 +2055,7 @@ function App() {
   }
 
   const handleStartInstantAdventure = useCallback((options?: { aiCount?: number; selectedAiSlug?: string }) => {
+    const selected = findGameBySlug(selectedGameSlug) ?? SPACE_RACE_GAME
     const localAiCount = options?.aiCount ?? 2
     const instantName = (profileDisplayName?.trim() || humanName.trim() || 'Captain')
 
@@ -1585,6 +2063,7 @@ function App() {
       entryPoint: 'INSTANT_ADVENTURE',
       aiCount: localAiCount,
       difficulty: 'medium',
+      gameSlug: selected.slug,
     })
 
     setQuickOnlineFlowActive(false)
@@ -1595,25 +2074,46 @@ function App() {
     setAiCount(localAiCount)
     setOnlineError(null)
     setOnlineStatusMessage('Launching Instant Adventure...')
-    setMatchStartStateTracked('ENTERED_MATCH', { entryPoint: 'INSTANT_ADVENTURE' })
-
-    dispatch({
-      type: 'INIT_GAME',
-      payload: {
-        mode: 'single',
-        humanNames: [instantName],
-        aiCount: localAiCount,
-        selectedAiSlugs: options?.selectedAiSlug ? [options.selectedAiSlug] : undefined,
-        difficulty: 'medium',
-        debugEnabled,
-        animationEnabled,
-      },
+    setMatchStartStateTracked('ENTERED_MATCH', {
+      entryPoint: 'INSTANT_ADVENTURE',
+      gameSlug: selected.slug,
     })
-    navigate(`/games/${SPACE_RACE_GAME.slug}`)
+
+    if (selected.slug === 'voyage-home') {
+      voyageDispatch({
+        type: 'INIT_VOYAGE_HOME',
+        payload: {
+          mode: 'single',
+          humanNames: [instantName],
+          aiProfiles: buildVoyageAiProfilesForSelection(localAiCount, options?.selectedAiSlug),
+          aiNames: buildVoyageAiNamesForSelection(localAiCount, options?.selectedAiSlug),
+          targetLeagues: DEFAULT_TARGET_LEAGUES,
+          debugEnabled,
+        },
+      })
+      navigate('/games/voyage-home')
+    } else {
+      dispatch({
+        type: 'INIT_GAME',
+        payload: {
+          mode: 'single',
+          humanNames: [instantName],
+          aiCount: localAiCount,
+          selectedAiSlugs: options?.selectedAiSlug ? [options.selectedAiSlug] : undefined,
+          difficulty: 'medium',
+          debugEnabled,
+          animationEnabled,
+        },
+      })
+      navigate(`/games/${SPACE_RACE_GAME.slug}`)
+    }
+
     trackUnifiedPlayEvent('match_entered', {
       entryPoint: 'INSTANT_ADVENTURE',
       humanCount: 1,
       aiCount: localAiCount,
+      gameSlug: selected.slug,
+      selectedAiSlug: options?.selectedAiSlug,
     })
   }, [
     animationEnabled,
@@ -1622,9 +2122,222 @@ function App() {
     humanName,
     navigate,
     profileDisplayName,
+    selectedGameSlug,
     setMatchStartStateTracked,
     trackUnifiedPlayEvent,
   ])
+
+  const submitVoyageOnlineAction = useCallback(
+    async (action: 'ROLL_DIE' | 'HOLD_TURN_TOTAL' | 'APPLY_CURSE_TO_LEADER') => {
+      if (!isOnlineMode || !onlineSessionId || !onlineSnapshot || !multiplayerIdentity || !voyageCurrentPlayer) {
+        setOnlineError('You cannot submit a Voyage Home action right now.')
+        return
+      }
+
+      if (onlineSnapshot.gameSlug !== 'voyage-home') {
+        setOnlineError('Active session is not a Voyage Home match.')
+        return
+      }
+
+      const actorSeat = onlineSnapshot.playerSeats.find((seat) => seat.userId === multiplayerIdentity.userId)
+      const actorPlayerId = actorSeat ? `p${actorSeat.seat}` : null
+
+      if (!actorPlayerId || voyageCurrentPlayer.id !== actorPlayerId || voyageCurrentPlayer.isAI) {
+        setOnlineError('It is not your turn.')
+        return
+      }
+
+      try {
+        setOnlineSubmitting(true)
+        setOnlineError(null)
+
+        const token = await getApiAccessToken()
+        const response = await fetch('/api/sessions/turn-intent', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            sessionId: onlineSessionId,
+            actorUserId: multiplayerIdentity.userId,
+            actorPlayerId,
+            expectedVersion: onlineSnapshot.version,
+            voyageAction: action,
+            clientRequestId: crypto.randomUUID(),
+            sentAt: new Date().toISOString(),
+          }),
+        })
+
+        const raw = await response.text().catch(() => '')
+        let ack: (TurnAck & { snapshot?: SessionSnapshot }) | null = null
+
+        if (raw) {
+          try {
+            ack = JSON.parse(raw) as TurnAck & { snapshot?: SessionSnapshot }
+          } catch {
+            if (!response.ok) {
+              throw new Error(`Turn intent failed (${response.status}): ${raw.slice(0, 120)}`)
+            }
+
+            throw new Error('Turn intent endpoint returned non-JSON response.')
+          }
+        }
+
+        if (!response.ok || !ack?.accepted) {
+          const reason = ack?.reason ?? `Turn intent failed (${response.status})`
+          setOnlineError(reason)
+
+          if (ack?.reason === 'STALE_VERSION' || ack?.reason === 'NOT_YOUR_TURN') {
+            await refreshOnlineSnapshot()
+          }
+
+          return
+        }
+
+        if (ack?.snapshot) {
+          setOnlineSnapshot(ack.snapshot)
+        }
+      } catch (error) {
+        setOnlineError(error instanceof Error ? error.message : 'Failed to submit Voyage action.')
+      } finally {
+        setOnlineSubmitting(false)
+      }
+    },
+    [
+      getApiAccessToken,
+      isOnlineMode,
+      multiplayerIdentity,
+      onlineSessionId,
+      onlineSnapshot,
+      refreshOnlineSnapshot,
+      voyageCurrentPlayer,
+    ],
+  )
+
+  const handleVoyageRoll = useCallback(() => {
+    if (
+      !authoritativeVoyageState.started ||
+      authoritativeVoyageState.winnerId ||
+      voyageCurrentPlayer?.isAI ||
+      isVoyageRollAnimating
+    ) {
+      console.debug('[voyage-home] ROLL_DIE blocked', {
+        started: authoritativeVoyageState.started,
+        winnerId: authoritativeVoyageState.winnerId,
+        currentPlayerId: voyageCurrentPlayer?.id,
+        currentPlayerName: voyageCurrentPlayer?.name,
+        currentPlayerIsAI: voyageCurrentPlayer?.isAI,
+        rollAnimating: isVoyageRollAnimating,
+        currentPlayerIndex: authoritativeVoyageState.currentPlayerIndex,
+        turn: authoritativeVoyageState.turn,
+        round: authoritativeVoyageState.round,
+      })
+      return
+    }
+
+    if (isOnlineMode) {
+      void submitVoyageOnlineAction('ROLL_DIE')
+      return
+    }
+
+    console.debug('[voyage-home] ROLL_DIE dispatch', {
+      currentPlayerId: voyageCurrentPlayer.id,
+      currentPlayerName: voyageCurrentPlayer.name,
+      pendingCurse: voyageCurrentPlayer.pendingCurse,
+      turnTotal: voyageCurrentPlayer.turnTotal,
+      turn: authoritativeVoyageState.turn,
+      round: authoritativeVoyageState.round,
+    })
+
+    if (authoritativeVoyageState.log.length <= 1) {
+      trackUnifiedPlayEvent('voyage_home_first_roll')
+    }
+    runVoyageRollWithAnimation({
+      id: voyageCurrentPlayer.id,
+      name: voyageCurrentPlayer.name,
+      isAI: voyageCurrentPlayer.isAI,
+      isCurseStartRoll: voyageCurrentPlayer.pendingCurse && !voyageCurrentPlayer.curseStartResolvedThisTurn,
+    })
+  }, [
+    authoritativeVoyageState.log.length,
+    authoritativeVoyageState.round,
+    authoritativeVoyageState.started,
+    authoritativeVoyageState.turn,
+    authoritativeVoyageState.winnerId,
+    isOnlineMode,
+    isVoyageRollAnimating,
+    runVoyageRollWithAnimation,
+    submitVoyageOnlineAction,
+    trackUnifiedPlayEvent,
+    voyageCurrentPlayer,
+  ])
+
+  const handleVoyageHold = useCallback(() => {
+    if (!authoritativeVoyageState.started || authoritativeVoyageState.winnerId || voyageCurrentPlayer?.isAI) {
+      return
+    }
+
+    if (isOnlineMode) {
+      void submitVoyageOnlineAction('HOLD_TURN_TOTAL')
+      return
+    }
+
+    voyageDispatch({ type: 'HOLD_TURN_TOTAL' })
+  }, [
+    authoritativeVoyageState.started,
+    authoritativeVoyageState.winnerId,
+    isOnlineMode,
+    submitVoyageOnlineAction,
+    voyageCurrentPlayer?.isAI,
+  ])
+
+  const handleVoyageCurse = useCallback(() => {
+    if (!authoritativeVoyageState.started || authoritativeVoyageState.winnerId || voyageCurrentPlayer?.isAI) {
+      return
+    }
+
+    if (isOnlineMode) {
+      void submitVoyageOnlineAction('APPLY_CURSE_TO_LEADER')
+      return
+    }
+
+    voyageDispatch({ type: 'APPLY_CURSE_TO_LEADER' })
+  }, [
+    authoritativeVoyageState.started,
+    authoritativeVoyageState.winnerId,
+    isOnlineMode,
+    submitVoyageOnlineAction,
+    voyageCurrentPlayer?.isAI,
+  ])
+
+  const handleVoyageNewGame = useCallback(() => {
+    voyageRollTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    voyageRollTimersRef.current = []
+
+    setIsVoyageRollAnimating(false)
+    setVoyageRollAnimationPlayerName(undefined)
+    setVoyageRollAnimationPlayerId(undefined)
+    setVoyageRollAnimationDieColor('blue')
+    setIsVoyageShipwreckAnimating(false)
+    setVoyageShipwreckPlayerName(undefined)
+
+    if (voyageShipwreckTimerRef.current !== null) {
+      window.clearTimeout(voyageShipwreckTimerRef.current)
+      voyageShipwreckTimerRef.current = null
+    }
+
+    if (voyageCelebrationTimerRef.current !== null) {
+      window.clearTimeout(voyageCelebrationTimerRef.current)
+      voyageCelebrationTimerRef.current = null
+    }
+
+    lastVoyageShipwreckKeyRef.current = null
+    setShowVoyageWinCelebration(false)
+    setVoyageAiTurnGate(false)
+    voyageDispatch({ type: 'NEW_GAME' })
+    navigate('/')
+  }, [navigate])
 
   const leaveCurrentLobbySessionIfNeeded = useCallback(async () => {
     if (!onlineSessionId) {
@@ -1670,19 +2383,31 @@ function App() {
 
       setOnlineError(null)
       setOnlineStatusMessage(`Starting ${aiLabel} adventure...`)
-      setHomeStartMode('INSTANT')
       setMatchStartStateTracked('STARTING', {
         entryPoint: 'FAST_ONLINE',
         targetType: 'ai',
       })
 
-      await leaveCurrentLobbySessionIfNeeded()
-      handleStartInstantAdventure({
-        aiCount: 1,
-        selectedAiSlug: aiSlug,
-      })
+      try {
+        await leaveCurrentLobbySessionIfNeeded()
+        handleStartInstantAdventure({
+          aiCount: 1,
+          selectedAiSlug: aiSlug,
+        })
+      } catch (error) {
+        setOnlineError(error instanceof Error ? error.message : 'Failed to start online AI match.')
+        setMatchStartStateTracked('ERROR', {
+          entryPoint: 'FAST_ONLINE',
+          targetType: 'ai',
+        })
+      }
     },
-    [handleStartInstantAdventure, leaveCurrentLobbySessionIfNeeded, setMatchStartStateTracked, trackUnifiedPlayEvent],
+    [
+      handleStartInstantAdventure,
+      leaveCurrentLobbySessionIfNeeded,
+      setMatchStartStateTracked,
+      trackUnifiedPlayEvent,
+    ],
   )
 
   const handleSelectHomeStartMode = useCallback(
@@ -1722,7 +2447,11 @@ function App() {
       setMatchStartStateTracked('IDLE')
       setOnlineStatusMessage('Choose from waiting humans or AI opponents, then start matchmaking.')
     },
-    [clearOnlineContextForOfflineStart, multiplayerEligibility.eligible, setMatchStartStateTracked],
+    [
+      clearOnlineContextForOfflineStart,
+      multiplayerEligibility.eligible,
+      setMatchStartStateTracked,
+    ],
   )
 
   const handleKeepWaitingQuickOnline = useCallback(() => {
@@ -1839,12 +2568,17 @@ function App() {
 
     void (async () => {
       try {
+        const selected = findGameBySlug(selectedGameSlug) ?? SPACE_RACE_GAME
         const token = await getApiAccessToken()
         const response = await fetch('/api/matchmaking/queue', {
           method: 'POST',
           headers: {
+            'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
+          body: JSON.stringify({
+            gameSlug: selected.slug,
+          }),
         })
 
         if (!response.ok) {
@@ -1884,6 +2618,7 @@ function App() {
     isOnlineMode,
     multiplayerEligibility.eligible,
     refreshPresenceData,
+    selectedGameSlug,
   ])
 
   useEffect(() => {
@@ -2045,12 +2780,19 @@ function App() {
   }, [onlineSessionId, onlineSnapshot, quickOnlineFlowActive, setMatchStartStateTracked, trackUnifiedPlayEvent])
 
   useEffect(() => {
-    if (!onlineSnapshot?.gameState.started || pathname === `/games/${SPACE_RACE_GAME.slug}`) {
+    if (!onlineSnapshot?.gameState.started) {
       return
     }
 
-    navigate(`/games/${SPACE_RACE_GAME.slug}`)
-  }, [navigate, onlineSnapshot?.gameState.started, pathname])
+    const targetPath =
+      onlineSnapshot.gameSlug === 'voyage-home' ? '/games/voyage-home' : `/games/${SPACE_RACE_GAME.slug}`
+
+    if (pathname === targetPath) {
+      return
+    }
+
+    navigate(targetPath)
+  }, [navigate, onlineSnapshot?.gameState.started, onlineSnapshot?.gameSlug, pathname])
 
   const handleEndTurn = () => {
     if (!currentPlayer || currentPlayer.isAI || isResolving) {
@@ -2318,6 +3060,7 @@ function App() {
     setOnlineSubmitting(false)
     setOnlineLifecycleSubmitting(false)
     setQuickOnlineFlowActive(false)
+    setIsVoyageAiThinking(false)
     setMatchStartStateTracked('IDLE')
 
     if (onlineRealtimeRef.current) {
@@ -2326,6 +3069,8 @@ function App() {
     }
 
     dispatch({ type: 'NEW_GAME' })
+    voyageDispatch({ type: 'NEW_GAME' })
+    navigate('/')
   }
 
   const matchStartStateCopy: Partial<Record<MatchStartState, { title: string; detail: string }>> = {
@@ -2411,6 +3156,24 @@ function App() {
     return (
       <div className="flex min-h-screen flex-col">
         <SpaceRaceHowToPlayPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (isVoyageHomeHowToPlayPath) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <VoyageHomeHowToPlayPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (isHowToPlayPath) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <HowToPlayPage />
         <AppFooter />
       </div>
     )
@@ -2526,6 +3289,45 @@ function App() {
     )
   }
 
+  if (isVoyageHomeRoute && !authoritativeVoyageState.started) {
+    console.debug('[voyage-home] route opened without started game state', {
+      path: pathname,
+      started: authoritativeVoyageState.started,
+      currentPlayerIndex: authoritativeVoyageState.currentPlayerIndex,
+      turn: authoritativeVoyageState.turn,
+      round: authoritativeVoyageState.round,
+    })
+
+    return (
+      <div className="flex min-h-screen flex-col">
+        <div className="mx-auto flex w-full max-w-4xl flex-1 items-center p-6">
+          <section className="w-full rounded-2xl border border-slate-700 bg-slate-950/80 p-6 text-slate-100">
+            <p className="text-sm uppercase tracking-wide text-cyan-300">Dice Odysseys</p>
+            <h1 className="mt-1 text-3xl font-bold text-cyan-100">Voyage Home</h1>
+            <p className="mt-2 text-sm text-slate-300">
+              Choose local options on the home screen, then launch your voyage.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Link
+                to="/"
+                className="rounded-md bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+              >
+                Go to Home Launcher
+              </Link>
+              <Link
+                to="/games/voyage-home/how-to-play"
+                className="rounded-md border border-slate-500 px-4 py-2 text-sm font-semibold text-slate-100"
+              >
+                Read How to Play
+              </Link>
+            </div>
+          </section>
+        </div>
+        <AppFooter />
+      </div>
+    )
+  }
+
   if (pathname === '/') {
     return (
       <div className="flex min-h-screen flex-col">
@@ -2562,7 +3364,7 @@ function App() {
                 About
               </Link>
               <Link
-                to="/games/space-race/how-to-play"
+                to="/how-to-play"
                 className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
               >
                 How to Play
@@ -2665,7 +3467,7 @@ function App() {
                     : 'border-slate-400/70 bg-slate-900/60 text-slate-100'
                 }`}
                 onClick={() => handleSelectHomeStartMode('ONLINE')}
-                disabled={selectedGame.status !== 'active'}
+                disabled={selectedGame.status !== 'active' || !onlineModeAllowedForSelectedGame}
               >
                 <p className="text-sm font-semibold">Online Match</p>
                 <p className="mt-1 text-xs">Find others for online play.</p>
@@ -2751,7 +3553,7 @@ function App() {
             </section>
           )}
 
-          {selectedGame.status === 'active' && homeStartMode === 'ONLINE' && (
+          {selectedGame.status === 'active' && homeStartMode === 'ONLINE' && onlineModeAllowedForSelectedGame && (
             <section className="space-y-3 rounded-md border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-200">
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2 rounded border border-slate-700 bg-slate-950/40 p-2">
@@ -2836,7 +3638,7 @@ function App() {
           )}
 
 
-          {selectedGame.status === 'active' && homeStartMode === 'ONLINE' && mode === 'multiplayer' && (onlineStatusMessage || onlineError || onlineSessionId || matchStartState !== 'IDLE') && (
+          {selectedGame.status === 'active' && homeStartMode === 'ONLINE' && onlineModeAllowedForSelectedGame && mode === 'multiplayer' && (onlineStatusMessage || onlineError || onlineSessionId || matchStartState !== 'IDLE') && (
             <div className="mt-3 space-y-2 rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-200">
               {matchStartState !== 'IDLE' && matchStartStateCopy[matchStartState] && (
                 <div className="rounded-md border border-cyan-400/40 bg-cyan-900/20 px-2 py-1.5">
@@ -2939,7 +3741,7 @@ function App() {
           )}
 
 
-          {selectedGame.status === 'active' && homeStartMode === 'ONLINE' && mode === 'multiplayer' && SHOW_DEBUG_CONTROLS && (
+          {selectedGame.status === 'active' && homeStartMode === 'ONLINE' && onlineModeAllowedForSelectedGame && mode === 'multiplayer' && SHOW_DEBUG_CONTROLS && (
             <section className="mt-4 space-y-2 rounded-md border border-slate-700 bg-slate-900/50 p-3 text-xs text-slate-300">
               <p className="font-semibold text-slate-200">Temporary Debug (remove later)</p>
               <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
@@ -3035,6 +3837,54 @@ function App() {
         </div>
         <AppFooter />
       </div>
+    )
+  }
+
+  if (isVoyageHomeRoute) {
+    return (
+      <>
+        <div className="flex min-h-screen flex-col">
+          <VoyageHomePage
+            state={authoritativeVoyageState}
+            showWinCelebration={showVoyageWinCelebration}
+            prefersReducedMotion={prefersReducedMotion}
+            winConfetti={humanWinConfetti}
+            isAiThinking={isVoyageAiThinking}
+            isRollAnimating={isVoyageRollAnimating}
+            showAiTurnGate={voyageAiTurnGate}
+            autoPlayAiTurns={voyageAutoPlayAiTurns}
+            onSetAutoPlayAiTurns={setVoyageAutoPlayAiTurns}
+            onContinueAiTurn={() => setVoyageAiTurnGate(false)}
+            onRoll={handleVoyageRoll}
+            onHold={handleVoyageHold}
+            onCurse={handleVoyageCurse}
+            onNewGame={handleVoyageNewGame}
+          />
+          <AppFooter />
+        </div>
+        <ResolveDiceAnimation
+          active={isVoyageRollAnimating}
+          playerName={voyageRollAnimationPlayerName ?? voyageCurrentPlayer?.name}
+          variant="rolling"
+          prefersReducedMotion={prefersReducedMotion}
+          diceCount={1}
+          fixedColor={voyageRollAnimationDieColor}
+          resolvedValues={
+            isVoyageRollAnimating &&
+            authoritativeVoyageState.lastRoll &&
+            voyageRollAnimationPlayerId &&
+            authoritativeVoyageState.lastRoll.playerId === voyageRollAnimationPlayerId
+              ? [authoritativeVoyageState.lastRoll.value]
+              : undefined
+          }
+        />
+        <ResolveDiceAnimation
+          active={isVoyageShipwreckAnimating}
+          playerName={voyageShipwreckPlayerName}
+          variant="shipwreck"
+          prefersReducedMotion={prefersReducedMotion}
+        />
+      </>
     )
   }
 

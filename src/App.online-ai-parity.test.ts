@@ -7,7 +7,7 @@ describe('Online AI parity with Instant Adventure', () => {
     const appSource = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8')
 
     expect(appSource).not.toContain('/api/sessions/start-vs-ai')
-    expect(appSource).toContain('handleStartInstantAdventure(')
+    expect(appSource).toContain('handleStartInstantAdventure({')
   })
 
   it('keeps Online→AI handler on local-start sequence', () => {

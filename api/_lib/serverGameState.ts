@@ -1,5 +1,7 @@
 import { randomInt } from 'node:crypto'
 import type { Allocation, Color, GameState, Planet, Player } from '../../src/types.js'
+import { initialVoyageHomeState, voyageHomeReducer } from '../../src/voyageHome/reducer.js'
+import type { VoyageHomeAiProfile, VoyageHomeState } from '../../src/voyageHome/types.js'
 
 const DICE_COLORS: Color[] = ['red', 'red', 'blue', 'blue', 'green', 'green']
 const INITIAL_GALAXY_SIZE = 12
@@ -23,6 +25,12 @@ const makePlayer = (id: string, name: string): Player => ({
 interface HybridSeatPlayerConfig {
   name: string
   isAI: boolean
+}
+
+interface VoyageSeatPlayerConfig {
+  name: string
+  isAI: boolean
+  aiProfile?: VoyageHomeAiProfile
 }
 
 const makePlanet = (id: number): Planet => ({
@@ -62,6 +70,47 @@ export const createHotseatGameState = (humanNames: string[]): GameState => {
     },
     latestTurnResolution: undefined,
     turnResolutionHistory: [],
+  }
+}
+
+export const createGameAwareHotseatState = (gameSlug: unknown, humanNames: string[]): unknown => {
+  if (gameSlug === 'voyage-home') {
+    return voyageHomeReducer(initialVoyageHomeState, {
+      type: 'INIT_VOYAGE_HOME',
+      payload: {
+        mode: 'hotseat',
+        humanNames,
+      },
+    })
+  }
+
+  return createHotseatGameState(humanNames)
+}
+
+export const createVoyageOnlineSeatState = (seatPlayers: VoyageSeatPlayerConfig[]): VoyageHomeState => {
+  const baseState = voyageHomeReducer(initialVoyageHomeState, {
+    type: 'INIT_VOYAGE_HOME',
+    payload: {
+      mode: 'hotseat',
+      humanNames: seatPlayers.map((seat) => seat.name),
+    },
+  })
+
+  return {
+    ...baseState,
+    players: baseState.players.map((player, index) => {
+      const seatPlayer = seatPlayers[index]
+      if (!seatPlayer) {
+        return player
+      }
+
+      return {
+        ...player,
+        name: seatPlayer.name,
+        isAI: seatPlayer.isAI,
+        aiProfile: seatPlayer.isAI ? (seatPlayer.aiProfile ?? 'odys') : undefined,
+      }
+    }),
   }
 }
 

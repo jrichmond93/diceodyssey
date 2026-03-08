@@ -1,7 +1,9 @@
 import type { SessionSnapshot } from '../../src/multiplayer/types.js'
+import { resolveSessionGameSlug } from './gameSlugCompat.js'
 
 export interface SessionRow {
   id: string
+  game_slug?: string | null
   version: number
   status: 'lobby' | 'active' | 'finished' | 'abandoned'
   game_state: unknown
@@ -20,6 +22,7 @@ export interface SeatRow {
 
 export const mapSessionSnapshot = (session: SessionRow, seats: SeatRow[]): SessionSnapshot => ({
   sessionId: session.id,
+  gameSlug: resolveSessionGameSlug(session),
   version: session.version,
   status: session.status,
   gameState: session.game_state as SessionSnapshot['gameState'],

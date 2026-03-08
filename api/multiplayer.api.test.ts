@@ -347,6 +347,7 @@ interface QueueResponsePayload {
 interface SnapshotPayload {
   snapshot: {
     sessionId: string
+    gameSlug: string
     status: string
     version: number
     gameState: {
@@ -465,6 +466,120 @@ describe('Phase 3 API lifecycle', () => {
     expect(snapshot.playerSeats).toHaveLength(2)
   })
 
+  it('creates Voyage Home lobby state when queue receives voyage-home gameSlug', async () => {
+    const queueReq = createMockReq({
+      method: 'POST',
+      body: {
+        gameSlug: 'voyage-home',
+      },
+    })
+    const queueRes = createMockRes()
+    await queueHandler(queueReq, queueRes)
+
+    const queueResult = queueRes.getResult()
+    expect(queueResult.statusCode).toBe(200)
+
+    const payload = queueResult.payload as { sessionId: string; gameSlug: string }
+    expect(payload.gameSlug).toBe('voyage-home')
+
+    const session = db.dice_sessions.find((entry) => entry.id === payload.sessionId)
+    expect(session?.game_slug).toBe('voyage-home')
+
+    const gameState = session?.game_state as { mode?: string; targetLeagues?: number }
+    expect(gameState.mode).toBe('single')
+    expect(gameState.targetLeagues).toBe(80)
+  })
+
+  it('initializes Voyage Home hotseat state when second player joins lobby', async () => {
+    const queueReq = createMockReq({
+      method: 'POST',
+      body: {
+        gameSlug: 'voyage-home',
+      },
+    })
+    const queueRes = createMockRes()
+    await queueHandler(queueReq, queueRes)
+
+    const queueResult = queueRes.getResult()
+    expect(queueResult.statusCode).toBe(200)
+    const sessionId = (queueResult.payload as { sessionId: string }).sessionId
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u2', subject: 'auth0|u2' })
+    const joinRes = createMockRes()
+    await joinHandler(createMockReq({ method: 'POST', query: { id: sessionId } }), joinRes)
+    expect(joinRes.getResult().statusCode).toBe(200)
+
+    const session = db.dice_sessions.find((entry) => entry.id === sessionId)
+    expect(session?.status).toBe('active')
+
+    const gameState = session?.game_state as {
+      started?: boolean
+      mode?: string
+      players?: Array<{ id: string }>
+    }
+
+    expect(gameState.started).toBe(true)
+    expect(gameState.mode).toBe('hotseat')
+    expect(gameState.players?.map((player) => player.id)).toEqual(['p1', 'p2'])
+
+    const getRes = createMockRes()
+    await sessionHandler(createMockReq({ method: 'GET', query: { id: sessionId } }), getRes)
+    expect(getRes.getResult().statusCode).toBe(200)
+
+    const snapshot = (getRes.getResult().payload as SnapshotPayload).snapshot
+    expect(snapshot.gameSlug).toBe('voyage-home')
+  })
+
+  it('accepts Voyage Home online turn intents using voyageAction payload', async () => {
+    const queueRes = createMockRes()
+    await queueHandler(
+      createMockReq({
+        method: 'POST',
+        body: {
+          gameSlug: 'voyage-home',
+        },
+      }),
+      queueRes,
+    )
+
+    const queueResult = queueRes.getResult()
+    expect(queueResult.statusCode).toBe(200)
+    const sessionId = (queueResult.payload as { sessionId: string }).sessionId
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u2', subject: 'auth0|u2' })
+    const joinRes = createMockRes()
+    await joinHandler(createMockReq({ method: 'POST', query: { id: sessionId } }), joinRes)
+    expect(joinRes.getResult().statusCode).toBe(200)
+
+    verifyRequestUserMock.mockResolvedValueOnce({ userId: 'auth0|u1', subject: 'auth0|u1' })
+    const rollRes = createMockRes()
+    await turnIntentHandler(
+      createMockReq({
+        method: 'POST',
+        query: { id: sessionId },
+        body: {
+          actorUserId: 'auth0|u1',
+          actorPlayerId: 'p1',
+          expectedVersion: 1,
+          voyageAction: 'ROLL_DIE',
+          clientRequestId: 'voyage-roll-1',
+          sentAt: new Date().toISOString(),
+        },
+      }),
+      rollRes,
+    )
+
+    const rollResult = rollRes.getResult()
+    expect(rollResult.statusCode).toBe(200)
+    const payload = rollResult.payload as TurnAckPayload
+    expect(payload.accepted).toBe(true)
+    expect(payload.latestVersion).toBeGreaterThanOrEqual(2)
+    expect(payload.snapshot?.gameSlug).toBe('voyage-home')
+
+    const snapshotState = payload.snapshot?.gameState as { lastRoll?: { value: number } }
+    expect(snapshotState.lastRoll?.value).toBeGreaterThanOrEqual(1)
+  })
+
   it('starts an online match versus selected AI immediately', async () => {
     const startRes = createMockRes()
     await startVsAiHandler(
@@ -500,6 +615,40 @@ describe('Phase 3 API lifecycle', () => {
     }
     expect(gameState.started).toBe(true)
     expect(gameState.players.map((player) => player.isAI)).toEqual([false, true])
+  })
+
+  it('starts Voyage Home online match versus selected AI when requested', async () => {
+    const startRes = createMockRes()
+    await startVsAiHandler(
+      createMockReq({
+        method: 'POST',
+        body: {
+          aiSlug: 'zeus',
+          gameSlug: 'voyage-home',
+        },
+      }),
+      startRes,
+    )
+
+    const startResult = startRes.getResult()
+    expect(startResult.statusCode).toBe(200)
+
+    const payload = startResult.payload as { sessionId: string; gameSlug: string }
+    expect(payload.gameSlug).toBe('voyage-home')
+
+    const session = db.dice_sessions.find((entry) => entry.id === payload.sessionId)
+    expect(session?.status).toBe('active')
+    expect(session?.game_slug).toBe('voyage-home')
+
+    const gameState = session?.game_state as {
+      mode?: string
+      players?: Array<{ id: string; isAI: boolean; aiProfile?: string }>
+    }
+
+    expect(gameState.mode).toBe('hotseat')
+    expect(gameState.players?.map((player) => player.id)).toEqual(['p1', 'p2'])
+    expect(gameState.players?.map((player) => player.isAI)).toEqual([false, true])
+    expect(gameState.players?.[1]?.aiProfile).toBe('posei')
   })
 
   it('rate limits queue requests when threshold is exceeded', async () => {
@@ -1415,7 +1564,7 @@ describe('Phase 3 API lifecycle', () => {
   it('excludes stale seats from presence online lists', async () => {
     const now = Date.now()
     const staleIso = new Date(now - 20 * 60 * 1000).toISOString()
-    const freshIso = new Date(now - 30 * 1000).toISOString()
+    const freshIso = new Date(now - 10 * 1000).toISOString()
 
     db.dice_sessions.push(
       {

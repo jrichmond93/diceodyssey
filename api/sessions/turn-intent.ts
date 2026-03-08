@@ -9,24 +9,53 @@ import { publishSessionRealtimeEventBestEffort } from '../_lib/realtime.js'
 import { createApiRequestContext } from '../_lib/requestContext.js'
 import { mapSessionSnapshot, type SeatRow, type SessionRow as SnapshotSessionRow } from '../_lib/sessionSnapshot.js'
 import { advanceToNextPlayer, applyAllocationToCurrentPlayer } from '../_lib/serverGameState.js'
+import { isMissingGameSlugColumnError, resolveSessionGameSlug } from '../_lib/gameSlugCompat.js'
 import { computeAIAllocation, resolveCurrentPlayerTurn } from '../../src/engine/gameEngine.js'
 import type { Allocation, GameState } from '../../src/types.js'
+import { chooseVoyageHomeAction } from '../../src/voyageHome/ai.js'
+import { voyageHomeReducer } from '../../src/voyageHome/reducer.js'
+import type { VoyageHomeState } from '../../src/voyageHome/types.js'
+
+type VoyageTurnAction = 'ROLL_DIE' | 'HOLD_TURN_TOTAL' | 'APPLY_CURSE_TO_LEADER'
 
 interface TurnIntentBody {
   sessionId?: string
   actorUserId: string
   actorPlayerId: string
   expectedVersion: number
-  allocation: Allocation
+  allocation?: Allocation
+  voyageAction?: VoyageTurnAction
   clientRequestId: string
   sentAt: string
 }
 
 type SessionRow = {
   id: string
+  game_slug?: string | null
   version: number
   status: 'lobby' | 'active' | 'finished' | 'abandoned'
   game_state: unknown
+}
+
+const selectSessionRowById = async (
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  sessionId: string,
+) => {
+  let sessionResult = await supabase
+    .from('dice_sessions')
+    .select('id, game_slug, version, status, game_state')
+    .eq('id', sessionId)
+    .single()
+
+  if (sessionResult.error && isMissingGameSlugColumnError(sessionResult.error)) {
+    sessionResult = await supabase
+      .from('dice_sessions')
+      .select('id, version, status, game_state')
+      .eq('id', sessionId)
+      .single()
+  }
+
+  return sessionResult
 }
 
 const isValidAllocation = (allocation: TurnIntentBody['allocation']): boolean => {
@@ -37,6 +66,9 @@ const isValidAllocation = (allocation: TurnIntentBody['allocation']): boolean =>
   const keys: Array<keyof Allocation> = ['move', 'claim', 'sabotage']
   return keys.every((key) => Array.isArray(allocation[key]))
 }
+
+const isValidVoyageAction = (action: unknown): action is VoyageTurnAction =>
+  action === 'ROLL_DIE' || action === 'HOLD_TURN_TOTAL' || action === 'APPLY_CURSE_TO_LEADER'
 
 const isGameStateLike = (state: unknown): state is GameState => {
   if (!state || typeof state !== 'object') {
@@ -49,6 +81,21 @@ const isGameStateLike = (state: unknown): state is GameState => {
     typeof candidate.currentPlayerIndex === 'number' &&
     Array.isArray(candidate.players) &&
     Array.isArray(candidate.galaxy)
+  )
+}
+
+const isVoyageHomeStateLike = (state: unknown): state is VoyageHomeState => {
+  if (!state || typeof state !== 'object') {
+    return false
+  }
+
+  const candidate = state as Partial<VoyageHomeState>
+  return (
+    typeof candidate.turn === 'number' &&
+    typeof candidate.round === 'number' &&
+    typeof candidate.currentPlayerIndex === 'number' &&
+    Array.isArray(candidate.players) &&
+    typeof candidate.targetLeagues === 'number'
   )
 }
 
@@ -94,6 +141,33 @@ const resolveServerAITurns = (state: GameState): GameState => {
 
     nextState = resolved.winnerId || resolved.winnerReason ? resolved : advanceToNextPlayer(resolved)
     processed += 1
+  }
+
+  return nextState
+}
+
+const resolveServerVoyageAITurns = (state: VoyageHomeState): VoyageHomeState => {
+  let nextState = state
+  const maxServerActions = Math.max(10, nextState.players.length * 8)
+
+  for (let index = 0; index < maxServerActions; index += 1) {
+    if (nextState.winnerId) {
+      return nextState
+    }
+
+    const current = nextState.players[nextState.currentPlayerIndex]
+    if (!current?.isAI) {
+      return nextState
+    }
+
+    const action = chooseVoyageHomeAction(current, nextState)
+    const reduced = voyageHomeReducer(nextState, { type: action })
+
+    if (reduced === nextState) {
+      return nextState
+    }
+
+    nextState = reduced
   }
 
   return nextState
@@ -158,16 +232,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return
     }
 
-    if (!isValidAllocation(body.allocation)) {
-      sendJson(res, 400, {
-        accepted: false,
-        reason: 'INVALID_ALLOCATION',
-        requestId: body.clientRequestId,
-        traceId: requestContext.traceId,
-      })
-      return
-    }
-
     const supabase = getSupabaseAdminClient()
 
     const existingIntent = await supabase
@@ -197,11 +261,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return
     }
 
-    const sessionResult = await supabase
-      .from('dice_sessions')
-      .select('id, version, status, game_state')
-      .eq('id', sessionId)
-      .single()
+    const sessionResult = await selectSessionRowById(supabase, sessionId)
 
     if (
       sessionResult.error ||
@@ -230,29 +290,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const session = sessionResult.data as SessionRow
 
-    if (!isGameStateLike(session.game_state)) {
-      sendJson(res, 400, {
-        accepted: false,
-        reason: 'SESSION_CLOSED',
-        requestId: body.clientRequestId,
-        detail: 'SESSION_STATE_NOT_READY',
-        traceId: requestContext.traceId,
-      })
-      return
-    }
-
-    const sessionGameState = session.game_state
-    const currentPlayer = sessionGameState.players[sessionGameState.currentPlayerIndex]
-
-    if (!currentPlayer || currentPlayer.isAI || currentPlayer.id !== body.actorPlayerId) {
-      sendJson(res, 403, {
-        accepted: false,
-        reason: 'NOT_YOUR_TURN',
-        requestId: body.clientRequestId,
-        traceId: requestContext.traceId,
-      })
-      return
-    }
+    const isVoyageSession = resolveSessionGameSlug(session) === 'voyage-home' || isVoyageHomeStateLike(session.game_state)
 
     const seatResult = await supabase
       .from('dice_player_seats')
@@ -275,51 +313,156 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return
     }
 
-    let stateForResolution = sessionGameState
+    let postTurnState: unknown
+    let resolvedTurnCount = 1
+    let nextSessionStatus: SessionRow['status']
+    let intentPayload: unknown
 
-    if (currentPlayer.skippedTurns <= 0) {
-      const allocated = applyAllocationToCurrentPlayer(stateForResolution, body.allocation)
-      if (!allocated) {
+    if (isVoyageSession) {
+      if (!isVoyageHomeStateLike(session.game_state)) {
+        sendJson(res, 400, {
+          accepted: false,
+          reason: 'SESSION_CLOSED',
+          requestId: body.clientRequestId,
+          detail: 'SESSION_STATE_NOT_READY',
+          traceId: requestContext.traceId,
+        })
+        return
+      }
+
+      if (!isValidVoyageAction(body.voyageAction)) {
         sendJson(res, 400, {
           accepted: false,
           reason: 'INVALID_ALLOCATION',
+          requestId: body.clientRequestId,
+          detail: 'INVALID_VOYAGE_ACTION',
+          traceId: requestContext.traceId,
+        })
+        return
+      }
+
+      const sessionGameState = session.game_state
+      const currentPlayer = sessionGameState.players[sessionGameState.currentPlayerIndex]
+
+      if (!currentPlayer || currentPlayer.isAI || currentPlayer.id !== body.actorPlayerId) {
+        sendJson(res, 403, {
+          accepted: false,
+          reason: 'NOT_YOUR_TURN',
           requestId: body.clientRequestId,
           traceId: requestContext.traceId,
         })
         return
       }
 
-      const allocatedPlayer = allocated.players[allocated.currentPlayerIndex]
-      if (!allocatedPlayer?.allocation) {
+      const afterHumanTurn = voyageHomeReducer(sessionGameState, {
+        type: body.voyageAction,
+      })
+
+      if (afterHumanTurn === sessionGameState) {
         sendJson(res, 400, {
           accepted: false,
           reason: 'INVALID_ALLOCATION',
           requestId: body.clientRequestId,
+          detail: 'VOYAGE_ACTION_REJECTED',
           traceId: requestContext.traceId,
         })
         return
       }
 
-      stateForResolution = allocated
-    }
+      const postTurnVoyageState = resolveServerVoyageAITurns(afterHumanTurn)
 
-    const resolvedState = resolveCurrentPlayerTurn(stateForResolution, {
-      rng: getServerRngProvider(),
-      createLogEntryId: () => crypto.randomUUID(),
-    })
-
-    const afterHumanTurn = resolvedState.winnerId ? resolvedState : advanceToNextPlayer(resolvedState)
-    const postTurnState = resolveServerAITurns(afterHumanTurn)
-
-    const resolvedTurnCount = Math.max(1, postTurnState.turn - sessionGameState.turn)
-    const nextVersion = body.expectedVersion + resolvedTurnCount
-
-    const nextSessionStatus: SessionRow['status'] =
-      postTurnState.winnerId || postTurnState.winnerReason
+      postTurnState = postTurnVoyageState
+      resolvedTurnCount = Math.max(1, postTurnVoyageState.turn - sessionGameState.turn)
+      nextSessionStatus = postTurnVoyageState.winnerId
         ? 'finished'
         : session.status === 'lobby'
           ? 'active'
           : session.status
+      intentPayload = {
+        voyageAction: body.voyageAction,
+      }
+    } else {
+      if (!isValidAllocation(body.allocation)) {
+        sendJson(res, 400, {
+          accepted: false,
+          reason: 'INVALID_ALLOCATION',
+          requestId: body.clientRequestId,
+          traceId: requestContext.traceId,
+        })
+        return
+      }
+
+      if (!isGameStateLike(session.game_state)) {
+        sendJson(res, 400, {
+          accepted: false,
+          reason: 'SESSION_CLOSED',
+          requestId: body.clientRequestId,
+          detail: 'SESSION_STATE_NOT_READY',
+          traceId: requestContext.traceId,
+        })
+        return
+      }
+
+      const sessionGameState = session.game_state
+      const currentPlayer = sessionGameState.players[sessionGameState.currentPlayerIndex]
+
+      if (!currentPlayer || currentPlayer.isAI || currentPlayer.id !== body.actorPlayerId) {
+        sendJson(res, 403, {
+          accepted: false,
+          reason: 'NOT_YOUR_TURN',
+          requestId: body.clientRequestId,
+          traceId: requestContext.traceId,
+        })
+        return
+      }
+
+      let stateForResolution = sessionGameState
+
+      if (currentPlayer.skippedTurns <= 0) {
+        const allocated = applyAllocationToCurrentPlayer(stateForResolution, body.allocation)
+        if (!allocated) {
+          sendJson(res, 400, {
+            accepted: false,
+            reason: 'INVALID_ALLOCATION',
+            requestId: body.clientRequestId,
+            traceId: requestContext.traceId,
+          })
+          return
+        }
+
+        const allocatedPlayer = allocated.players[allocated.currentPlayerIndex]
+        if (!allocatedPlayer?.allocation) {
+          sendJson(res, 400, {
+            accepted: false,
+            reason: 'INVALID_ALLOCATION',
+            requestId: body.clientRequestId,
+            traceId: requestContext.traceId,
+          })
+          return
+        }
+
+        stateForResolution = allocated
+      }
+
+      const resolvedState = resolveCurrentPlayerTurn(stateForResolution, {
+        rng: getServerRngProvider(),
+        createLogEntryId: () => crypto.randomUUID(),
+      })
+
+      const afterHumanTurn = resolvedState.winnerId ? resolvedState : advanceToNextPlayer(resolvedState)
+      const postTurnGameState = resolveServerAITurns(afterHumanTurn)
+
+      postTurnState = postTurnGameState
+      resolvedTurnCount = Math.max(1, postTurnGameState.turn - sessionGameState.turn)
+      nextSessionStatus = postTurnGameState.winnerId || postTurnGameState.winnerReason
+        ? 'finished'
+        : session.status === 'lobby'
+          ? 'active'
+          : session.status
+      intentPayload = body.allocation
+    }
+
+    const nextVersion = body.expectedVersion + resolvedTurnCount
 
     const now = new Date().toISOString()
 
@@ -328,7 +471,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       actor_user_id: body.actorUserId,
       actor_player_id: body.actorPlayerId,
       session_version: body.expectedVersion,
-      allocation: body.allocation,
+      allocation: intentPayload,
       client_request_id: body.clientRequestId,
       sent_at: body.sentAt,
       created_at: now,
@@ -402,6 +545,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? mapSessionSnapshot(
             {
               id: sessionId,
+              game_slug: resolveSessionGameSlug({
+                game_slug: session.game_slug,
+                game_state: sessionUpdate.data.game_state,
+              }),
               version: sessionUpdate.data.version,
               status: sessionUpdate.data.status,
               game_state: sessionUpdate.data.game_state,
@@ -412,6 +559,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           )
         : {
             sessionId,
+          gameSlug: isVoyageSession ? 'voyage-home' : 'space-race',
             version: sessionUpdate.data.version,
             status: sessionUpdate.data.status,
             gameState: sessionUpdate.data.game_state,

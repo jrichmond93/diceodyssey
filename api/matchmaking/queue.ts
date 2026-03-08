@@ -1,13 +1,33 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { verifyRequestUser } from '../_lib/auth.js'
 import { getServerEnv } from '../_lib/env.js'
-import { methodNotAllowed, sendJson } from '../_lib/http.js'
+import { methodNotAllowed, readJsonBody, sendJson } from '../_lib/http.js'
 import { consumeRateLimit } from '../_lib/rateLimit.js'
 import { createApiRequestContext } from '../_lib/requestContext.js'
 import { getSupabaseAdminClient } from '../_lib/supabase.js'
 import { publishSessionRealtimeEventBestEffort } from '../_lib/realtime.js'
 import { initialGameState } from '../_lib/initialGameState.js'
 import { resolveUserProfileIdentity } from '../_lib/displayName.js'
+import { initialVoyageHomeState } from '../../src/voyageHome/reducer.js'
+import { isMissingGameSlugColumnError } from '../_lib/gameSlugCompat.js'
+
+type OnlineGameSlug = 'space-race' | 'voyage-home'
+
+interface QueueBody {
+  gameSlug?: OnlineGameSlug
+}
+
+const resolveQueueGameSlug = (value: unknown): OnlineGameSlug | null => {
+  if (value === undefined || value === null || value === '') {
+    return 'space-race'
+  }
+
+  if (value === 'space-race' || value === 'voyage-home') {
+    return value
+  }
+
+  return null
+}
 
 const getErrorDetail = (error: unknown): string => {
   if (error instanceof Error) {
@@ -47,6 +67,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     requestContext.logInfo('queue_request_received')
 
+    const body = await readJsonBody<QueueBody>(req)
+    const gameSlug = resolveQueueGameSlug(body.gameSlug)
+    if (!gameSlug) {
+      sendJson(res, 400, {
+        error: 'INVALID_GAME_SLUG',
+        traceId: requestContext.traceId,
+      })
+      return
+    }
+
     const serverEnv = getServerEnv()
     const rate = consumeRateLimit(
       'queue',
@@ -74,15 +104,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const sessionId = crypto.randomUUID()
     const now = new Date().toISOString()
+    const initialState = gameSlug === 'voyage-home' ? initialVoyageHomeState : initialGameState
 
-    const sessionInsert = await supabase.from('dice_sessions').insert({
+    let sessionInsert = await supabase.from('dice_sessions').insert({
       id: sessionId,
+      game_slug: gameSlug,
       status: 'lobby',
       version: 1,
-      game_state: initialGameState,
+      game_state: initialState,
       created_at: now,
       updated_at: now,
     })
+
+    if (sessionInsert.error && isMissingGameSlugColumnError(sessionInsert.error)) {
+      sessionInsert = await supabase.from('dice_sessions').insert({
+        id: sessionId,
+        status: 'lobby',
+        version: 1,
+        game_state: initialState,
+        created_at: now,
+        updated_at: now,
+      })
+    }
 
     if (sessionInsert.error) {
       throw sessionInsert.error
@@ -124,6 +167,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     sendJson(res, 200, {
       matchFound: true,
       sessionId,
+        gameSlug,
       traceId: requestContext.traceId,
     })
   } catch (error) {

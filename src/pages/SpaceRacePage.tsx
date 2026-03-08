@@ -211,12 +211,6 @@ export function SpaceRacePage({
                     >
                       View all
                     </Link>
-                    <Link
-                      to="/games/space-race/how-to-play"
-                      className="shrink-0 text-xs text-cyan-300 hover:text-cyan-200 md:ml-1"
-                    >
-                      How to Play
-                    </Link>
                   </>
                 )}
               </div>
@@ -230,6 +224,12 @@ export function SpaceRacePage({
             >
               {helpOpen ? 'Hide Help & Tips' : 'Show Help & Tips'}
             </button>
+            <Link
+              to="/games/space-race/how-to-play"
+              className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold leading-tight text-slate-100"
+            >
+              How to Play
+            </Link>
             <button
               type="button"
               className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold leading-tight text-slate-100"
@@ -562,6 +562,7 @@ export function SpaceRacePage({
         playerName={currentPlayer?.name}
         variant={resolveAnimationVariant}
         prefersReducedMotion={prefersReducedMotion}
+        diceCount={6}
       />
     </>
   )

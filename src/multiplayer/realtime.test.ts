@@ -4,6 +4,7 @@ import type { RealtimeEvent, SessionSnapshot } from './types'
 
 const buildSnapshot = (version: number): SessionSnapshot => ({
   sessionId: 's1',
+  gameSlug: 'space-race',
   version,
   status: 'active',
   gameState: {} as SessionSnapshot['gameState'],
