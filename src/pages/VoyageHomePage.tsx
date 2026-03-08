@@ -139,6 +139,7 @@ export function VoyageHomePage({
   const currentTurnTotal = currentPlayer?.turnTotal ?? 0
   const currentBankedLeagues = currentPlayer?.bankedLeagues ?? 0
   const currentPortrait = resolvePlayerPortrait(currentPlayer)
+  const winnerPlayer = state.winnerId ? state.players.find((player) => player.id === state.winnerId) : undefined
   const playerById = new Map(state.players.map((player) => [player.id, player]))
   const shipAccentByPlayerId = new Map(
     state.players.map((player, index) => [player.id, SHIP_TOKEN_ACCENTS[index % SHIP_TOKEN_ACCENTS.length]]),
@@ -255,14 +256,23 @@ export function VoyageHomePage({
 
       {state.winnerId && (
         <section className="rounded-xl border border-emerald-400 bg-emerald-900/30 p-4 text-emerald-100">
-          <p className="font-semibold">
-            Winner: {state.players.find((player) => player.id === state.winnerId)?.name ?? 'Captain'}
-          </p>
-          <p className="mt-1 text-sm text-emerald-200">
-            {state.suddenDeath.active
-              ? 'Sudden death resolved with a decisive lead.'
-              : 'Reached the target and led at round boundary.'}
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="font-semibold">Winner: {winnerPlayer?.name ?? 'Captain'}</p>
+              <p className="mt-1 text-sm text-emerald-200">
+                {state.suddenDeath.active
+                  ? `${winnerPlayer?.name ?? 'The winner'} claimed Ithaca with a sudden-death breakaway.`
+                  : `${winnerPlayer?.name ?? 'The winner'} banked enough leagues and held the lead at round's end.`}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="rounded border border-emerald-300 px-2 py-1 text-xs font-semibold text-emerald-100"
+              onClick={onNewGame}
+            >
+              New Game
+            </button>
+          </div>
         </section>
       )}
 
