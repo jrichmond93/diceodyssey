@@ -86,11 +86,11 @@ export function HowToPlayPage() {
 
             return [
               gameTile,
-              <article key="space-race-branding-tile" className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+              <article key="space-race-branding-tile" className="h-28 overflow-hidden rounded-lg border border-slate-700 bg-slate-900/40">
                 <img
                   src="/assets/branding/space-race.jpg"
                   alt="Space Race key art"
-                  className="mt-2 h-20 w-full rounded-md border border-slate-700 object-cover"
+                  className="h-full w-full object-cover"
                 />
               </article>,
             ]

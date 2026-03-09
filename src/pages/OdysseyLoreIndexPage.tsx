@@ -52,7 +52,7 @@ const odysseyChapters = [
   {
     title: 'Return to Ithaca',
     summary:
-      'The homecoming finale of disguise, recognition, justice, and restored order.',
+      'Odysseus returns to Ithaca in disguise and quietly tests loyalties before revealing himself. Through a chain of recognitions, allies gather while the suitors remain blind to the danger rising in their own hall. The finale delivers justice, reunites his household, and restores order after years of exile and loss.',
     to: '/odyssey/return-to-ithaca',
   },
 ]
@@ -106,6 +106,14 @@ export function OdysseyLoreIndexPage() {
             <p className="mt-2 text-sm text-slate-300">{chapter.summary}</p>
           </Link>
         ))}
+
+        <article className="h-38 overflow-hidden rounded-xl border border-slate-700 bg-cyan-950/40">
+          <img
+            src="/assets/odyssey/epic.jpg"
+            alt="Epic Odyssey montage artwork"
+            className="h-full w-full object-cover"
+          />
+        </article>
       </section>
     </main>
   )
