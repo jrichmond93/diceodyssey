@@ -39,6 +39,7 @@ import { DEFAULT_TARGET_LEAGUES } from './voyageHome/constants'
 import { initialVoyageHomeState, voyageHomeReducer } from './voyageHome/reducer'
 import type { VoyageHomeAiProfile, VoyageHomeState } from './voyageHome/types'
 import { chooseMythicRevealAction } from './mythicReveal/ai'
+import { MYTHIC_IMAGE_MANIFEST } from './mythicReveal/constants'
 import { initialMythicRevealState, mythicRevealReducer } from './mythicReveal/reducer'
 import { getCurrentPlayer as getMythicCurrentPlayer } from './mythicReveal/selectors'
 import type { MythicRevealAiProfile } from './mythicReveal/types'
@@ -65,6 +66,8 @@ const VOYAGE_AI_THINK_DELAY_MS = 500
 const MYTHIC_AI_THINK_DELAY_MS = 500
 const VOYAGE_ROLL_SPIN_MS = 900
 const VOYAGE_ROLL_RESULT_REVEAL_MS = 1400
+const MYTHIC_ROLL_SPIN_MS = 900
+const MYTHIC_ROLL_RESULT_REVEAL_MS = 2200
 const VOYAGE_SHIPWRECK_REVEAL_MS = 2000
 const RESOLVE_STAGE_DELAY_MS = 240
 const REDUCED_MOTION_STAGE_DELAY_MS = 80
@@ -197,6 +200,29 @@ const buildMythicAiProfileForSelection = (selectedAiSlug?: string): MythicReveal
 
   return AI_SLUG_TO_MYTHIC_PROFILE[selectedAiSlug.toLowerCase()] ?? 'circe'
 }
+
+const pickTwoDistinctRandomImageIds = (imageIds: string[]): [string, string] | undefined => {
+  if (imageIds.length < 2) {
+    return undefined
+  }
+
+  const firstIndex = Math.floor(Math.random() * imageIds.length)
+  const first = imageIds[firstIndex]
+  const remaining = imageIds.filter((_, index) => index !== firstIndex)
+  const second = remaining[Math.floor(Math.random() * remaining.length)]
+
+  return [first, second]
+}
+
+const buildMythicRematchImageIds = (previousImageIds: string[]): [string, string] | undefined => {
+  const allImageIds = MYTHIC_IMAGE_MANIFEST.map((entry) => entry.id)
+  const previous = new Set(previousImageIds)
+  const eligible = allImageIds.filter((id) => !previous.has(id))
+
+  // Prefer a full image rotation that excludes both images from the last game.
+  return pickTwoDistinctRandomImageIds(eligible) ?? pickTwoDistinctRandomImageIds(allImageIds)
+}
+
 type MatchStartState =
   | 'IDLE'
   | 'LOCKING_PLAN'
@@ -425,6 +451,12 @@ function App() {
   const [presenceSnapshot, setPresenceSnapshot] = useState<PresenceSnapshotPayload | null>(null)
   const [isVoyageAiThinking, setIsVoyageAiThinking] = useState(false)
   const [isVoyageRollAnimating, setIsVoyageRollAnimating] = useState(false)
+  const [isMythicRollAnimating, setIsMythicRollAnimating] = useState(false)
+  const [mythicRollAnimationPlayerName, setMythicRollAnimationPlayerName] = useState<string | undefined>(undefined)
+  const [mythicRollAnimationDieColor, setMythicRollAnimationDieColor] = useState<'blue' | 'green'>('blue')
+  const [mythicSabotageHitTargetFace, setMythicSabotageHitTargetFace] = useState<number | null>(null)
+  const [mythicSabotageHitPlayerId, setMythicSabotageHitPlayerId] = useState<string | null>(null)
+  const [mythicSabotageHitToken, setMythicSabotageHitToken] = useState(0)
   const [homeNavOpen, setHomeNavOpen] = useState(false)
   const [voyageRollAnimationPlayerName, setVoyageRollAnimationPlayerName] = useState<string | undefined>(undefined)
   const [voyageRollAnimationPlayerId, setVoyageRollAnimationPlayerId] = useState<string | undefined>(undefined)
@@ -461,10 +493,13 @@ function App() {
 
   const resolutionTimersRef = useRef<number[]>([])
   const voyageRollTimersRef = useRef<number[]>([])
+  const mythicRollTimersRef = useRef<number[]>([])
+  const mythicSabotageHitTimerRef = useRef<number | null>(null)
   const voyageShipwreckTimerRef = useRef<number | null>(null)
   const celebrationTimerRef = useRef<number | null>(null)
   const voyageCelebrationTimerRef = useRef<number | null>(null)
   const mythicCelebrationTimerRef = useRef<number | null>(null)
+  const mythicRollAnimationActiveRef = useRef(false)
   const onlineRealtimeRef = useRef<SessionRealtimeController | null>(null)
   const onlineSessionGuardRef = useRef<string | null>(null)
   const onlineLobbyBootstrappingRef = useRef(false)
@@ -474,6 +509,7 @@ function App() {
   const lastVoyageShipwreckKeyRef = useRef<string | null>(null)
   const voyageLobbyOpenedTrackedRef = useRef(false)
   const voyageStartClickedAtRef = useRef<number | null>(null)
+  const lastHandledMythicLogIdRef = useRef<string | null>(null)
   const [helpOpen, setHelpOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
       return false
@@ -1134,6 +1170,15 @@ function App() {
     return () => {
       voyageRollTimersRef.current.forEach((timer) => window.clearTimeout(timer))
       voyageRollTimersRef.current = []
+
+      mythicRollTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+      mythicRollTimersRef.current = []
+      mythicRollAnimationActiveRef.current = false
+
+      if (mythicSabotageHitTimerRef.current !== null) {
+        window.clearTimeout(mythicSabotageHitTimerRef.current)
+        mythicSabotageHitTimerRef.current = null
+      }
 
       if (voyageShipwreckTimerRef.current !== null) {
         window.clearTimeout(voyageShipwreckTimerRef.current)
@@ -2175,6 +2220,44 @@ function App() {
     }, spinMs))
   }, [animationEnabled, isVoyageRollAnimating, prefersReducedMotion])
 
+  const runMythicRollWithAnimation = useCallback((player?: {
+    name: string
+    isAI: boolean
+  }) => {
+    if (isMythicRollAnimating || mythicRollAnimationActiveRef.current) {
+      return
+    }
+
+    if (!animationEnabled) {
+      mythicDispatch({ type: 'ROLL_DICE' })
+      return
+    }
+
+    mythicRollTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    mythicRollTimersRef.current = []
+    mythicRollAnimationActiveRef.current = true
+
+    setMythicRollAnimationPlayerName(player?.name)
+    setMythicRollAnimationDieColor(player?.isAI ? 'green' : 'blue')
+    setIsMythicRollAnimating(true)
+
+    const spinMs = prefersReducedMotion ? Math.floor(MYTHIC_ROLL_SPIN_MS / 2) : MYTHIC_ROLL_SPIN_MS
+    const revealMs = prefersReducedMotion
+      ? Math.floor(MYTHIC_ROLL_RESULT_REVEAL_MS / 2)
+      : MYTHIC_ROLL_RESULT_REVEAL_MS
+
+    mythicRollTimersRef.current.push(window.setTimeout(() => {
+      mythicDispatch({ type: 'ROLL_DICE' })
+      mythicRollTimersRef.current.push(window.setTimeout(() => {
+        setIsMythicRollAnimating(false)
+        setMythicRollAnimationPlayerName(undefined)
+        setMythicRollAnimationDieColor('blue')
+        mythicRollTimersRef.current = []
+        mythicRollAnimationActiveRef.current = false
+      }, revealMs))
+    }, spinMs))
+  }, [animationEnabled, isMythicRollAnimating, prefersReducedMotion])
+
   useEffect(() => {
     if (
       isOnlineMode ||
@@ -2227,7 +2310,8 @@ function App() {
       mode !== 'single' ||
       !authoritativeMythicState.started ||
       authoritativeMythicState.winnerId ||
-      !mythicCurrentPlayer?.isAI
+      !mythicCurrentPlayer?.isAI ||
+      isMythicRollAnimating
     ) {
       setIsMythicAiThinking(false)
       return
@@ -2236,7 +2320,12 @@ function App() {
     setIsMythicAiThinking(true)
     const timer = window.setTimeout(() => {
       const nextAction = chooseMythicRevealAction(authoritativeMythicState, mythicCurrentPlayer)
-      if (nextAction) {
+      if (nextAction?.type === 'ROLL_DICE') {
+        runMythicRollWithAnimation({
+          name: mythicCurrentPlayer.name,
+          isAI: true,
+        })
+      } else if (nextAction) {
         mythicDispatch(nextAction)
       }
       setIsMythicAiThinking(false)
@@ -2248,10 +2337,56 @@ function App() {
     }
   }, [
     authoritativeMythicState,
+    isMythicRollAnimating,
     isMythicRevealRoute,
     mode,
     mythicCurrentPlayer,
+    runMythicRollWithAnimation,
   ])
+
+  useEffect(() => {
+    if (!isMythicRevealRoute || !authoritativeMythicState.started) {
+      setMythicSabotageHitTargetFace(null)
+      setMythicSabotageHitPlayerId(null)
+      lastHandledMythicLogIdRef.current = null
+      return
+    }
+
+    const latestLog = authoritativeMythicState.log[0]
+    if (!latestLog || latestLog.id === lastHandledMythicLogIdRef.current) {
+      return
+    }
+
+    lastHandledMythicLogIdRef.current = latestLog.id
+
+    const sabotageMatch = latestLog.message.match(/sabotaged section (\d+) from (.+)\./i)
+    if (!sabotageMatch) {
+      return
+    }
+
+    const targetFace = Number(sabotageMatch[1])
+    const targetPlayerName = sabotageMatch[2]?.trim()
+    const targetPlayer = authoritativeMythicState.players.find((player) => player.name === targetPlayerName)
+
+    if (!targetPlayer || !Number.isInteger(targetFace)) {
+      return
+    }
+
+    if (mythicSabotageHitTimerRef.current !== null) {
+      window.clearTimeout(mythicSabotageHitTimerRef.current)
+      mythicSabotageHitTimerRef.current = null
+    }
+
+    setMythicSabotageHitPlayerId(targetPlayer.id)
+    setMythicSabotageHitTargetFace(targetFace)
+    setMythicSabotageHitToken((token) => token + 1)
+
+    mythicSabotageHitTimerRef.current = window.setTimeout(() => {
+      setMythicSabotageHitTargetFace(null)
+      setMythicSabotageHitPlayerId(null)
+      mythicSabotageHitTimerRef.current = null
+    }, 500)
+  }, [isMythicRevealRoute, authoritativeMythicState.started, authoritativeMythicState.log, authoritativeMythicState.players])
 
   const buildVoyageAiProfiles = (count: number): VoyageHomeAiProfile[] => {
     const cycle: VoyageHomeAiProfile[] = ['odys', 'posei', 'poly']
@@ -2705,12 +2840,25 @@ function App() {
   }, [navigate])
 
   const handleMythicRoll = useCallback(() => {
-    if (!authoritativeMythicState.started || authoritativeMythicState.winnerId || mythicCurrentPlayer?.isAI) {
+    if (
+      !authoritativeMythicState.started ||
+      authoritativeMythicState.winnerId ||
+      !mythicCurrentPlayer ||
+      mythicCurrentPlayer.isAI
+    ) {
       return
     }
 
-    mythicDispatch({ type: 'ROLL_DICE' })
-  }, [authoritativeMythicState.started, authoritativeMythicState.winnerId, mythicCurrentPlayer?.isAI])
+    runMythicRollWithAnimation({
+      name: mythicCurrentPlayer.name,
+      isAI: false,
+    })
+  }, [
+    authoritativeMythicState.started,
+    authoritativeMythicState.winnerId,
+    mythicCurrentPlayer,
+    runMythicRollWithAnimation,
+  ])
 
   const handleMythicReveal = useCallback((face: number) => {
     if (!authoritativeMythicState.started || authoritativeMythicState.winnerId || mythicCurrentPlayer?.isAI) {
@@ -2737,6 +2885,22 @@ function App() {
   }, [authoritativeMythicState.started, authoritativeMythicState.winnerId, mythicCurrentPlayer?.isAI])
 
   const handleMythicNewGame = useCallback(() => {
+    mythicRollTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    mythicRollTimersRef.current = []
+    mythicRollAnimationActiveRef.current = false
+
+    if (mythicSabotageHitTimerRef.current !== null) {
+      window.clearTimeout(mythicSabotageHitTimerRef.current)
+      mythicSabotageHitTimerRef.current = null
+    }
+
+    setIsMythicRollAnimating(false)
+    setMythicRollAnimationPlayerName(undefined)
+    setMythicRollAnimationDieColor('blue')
+    setMythicSabotageHitTargetFace(null)
+    setMythicSabotageHitPlayerId(null)
+    lastHandledMythicLogIdRef.current = null
+
     if (mythicCelebrationTimerRef.current !== null) {
       window.clearTimeout(mythicCelebrationTimerRef.current)
       mythicCelebrationTimerRef.current = null
@@ -2744,7 +2908,25 @@ function App() {
 
     setIsMythicAiThinking(false)
     setShowMythicWinCelebration(false)
-    mythicDispatch({ type: 'NEW_GAME' })
+
+    const previousImageIds = authoritativeMythicState.players
+      .map((player) => player.board.imageId)
+      .filter((id): id is string => Boolean(id))
+
+    mythicDispatch({
+      type: 'INIT_MYTHIC_REVEAL',
+      payload: {
+        mode: authoritativeMythicState.mode,
+        humanName: authoritativeMythicState.players[0]?.name,
+        rivalName: authoritativeMythicState.players[1]?.name,
+        aiProfile: authoritativeMythicState.players[1]?.aiProfile ?? mythicAiProfile,
+        debugEnabled: authoritativeMythicState.debugEnabled,
+        forcedImageIds: buildMythicRematchImageIds(previousImageIds),
+      },
+    })
+  }, [authoritativeMythicState, mythicAiProfile])
+
+  const handleMythicBackToHome = useCallback(() => {
     navigate('/')
   }, [navigate])
 
@@ -3758,7 +3940,7 @@ function App() {
                 to="/"
                 className="rounded-md bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
               >
-                Back to Home
+                Home
               </Link>
               <Link
                 to={`/games/${SPACE_RACE_GAME.slug}`}
@@ -4519,21 +4701,36 @@ function App() {
 
   if (isMythicRevealRoute) {
     return (
-      <div className="flex min-h-screen flex-col">
-        <MythicRevealPage
-          state={authoritativeMythicState}
-          showWinCelebration={showMythicWinCelebration}
+      <>
+        <div className="flex min-h-screen flex-col">
+          <MythicRevealPage
+            state={authoritativeMythicState}
+            showWinCelebration={showMythicWinCelebration}
+            prefersReducedMotion={prefersReducedMotion}
+            winConfetti={humanWinConfetti}
+            isAiThinking={isMythicAiThinking}
+            sabotageHitTargetFace={mythicSabotageHitTargetFace}
+            sabotageHitPlayerId={mythicSabotageHitPlayerId}
+            sabotageHitToken={mythicSabotageHitToken}
+            onRoll={handleMythicRoll}
+            onReveal={handleMythicReveal}
+            onSabotage={handleMythicSabotage}
+            onEndTurn={handleMythicEndTurn}
+            onNewGame={handleMythicNewGame}
+            onBackToHome={handleMythicBackToHome}
+          />
+          <AppFooter />
+        </div>
+        <ResolveDiceAnimation
+          active={isMythicRollAnimating}
+          playerName={mythicRollAnimationPlayerName ?? mythicCurrentPlayer?.name}
+          variant="rolling"
           prefersReducedMotion={prefersReducedMotion}
-          winConfetti={humanWinConfetti}
-          isAiThinking={isMythicAiThinking}
-          onRoll={handleMythicRoll}
-          onReveal={handleMythicReveal}
-          onSabotage={handleMythicSabotage}
-          onEndTurn={handleMythicEndTurn}
-          onNewGame={handleMythicNewGame}
+          diceCount={6}
+          fixedColor={mythicRollAnimationDieColor}
+          resolvedValues={isMythicRollAnimating ? authoritativeMythicState.pendingRoll?.dice : undefined}
         />
-        <AppFooter />
-      </div>
+      </>
     )
   }
 

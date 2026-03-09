@@ -56,7 +56,7 @@ export function OpponentBioPage({ slug }: OpponentBioPageProps) {
               state={fromGame ? { fromGame: true } : undefined}
               className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
             >
-              Back to Opponents
+              Opponents
             </Link>
             <Link
               to="/"

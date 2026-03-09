@@ -16,10 +16,26 @@ export const getAvailableRevealFaces = (state: MythicRevealState): number[] => {
 
   const current = getCurrentPlayer(state)
   const revealed = new Set(current.board.sectionsRevealed)
+  const consumed = new Set(state.pendingRoll.consumedFaces)
 
   return Array.from(new Set(state.pendingRoll.dice))
     .filter(isValidFace)
+    .filter((face) => !consumed.has(face))
     .filter((face) => !revealed.has(face))
+    .sort((a, b) => a - b)
+}
+
+export const getAvailableSabotageFaces = (state: MythicRevealState): number[] => {
+  if (!state.pendingRoll?.canSabotage) {
+    return []
+  }
+
+  const opponent = getOpponentPlayer(state)
+  const rolled = new Set(Array.from(new Set(state.pendingRoll.dice)).filter(isValidFace))
+  const consumed = new Set(state.pendingRoll.consumedFaces)
+
+  return [...opponent.board.sectionsRevealed]
+    .filter((face) => rolled.has(face) && !consumed.has(face))
     .sort((a, b) => a - b)
 }
 

@@ -73,11 +73,82 @@ describe('mythicRevealReducer', () => {
 
     const next = mythicRevealReducer(withRoll, {
       type: 'CHOOSE_SABOTAGE',
+      payload: { targetFace: 2 },
+    })
+
+    expect(next.players[1].board.sectionsRevealed).toEqual([5])
+    expect(next.pendingRoll?.canSabotage).toBe(false)
+  })
+
+  it('rejects sabotage when target face was not rolled this turn', () => {
+    const base = initSingle()
+    const seeded: MythicRevealState = {
+      ...base,
+      players: [
+        base.players[0],
+        {
+          ...base.players[1],
+          board: {
+            ...base.players[1].board,
+            sectionsRevealed: [2, 5],
+          },
+        },
+      ],
+    }
+
+    const withRoll = mythicRevealReducer(seeded, {
+      type: 'ROLL_DICE',
+      payload: { dice: [1, 1, 2, 2, 3, 3], canSabotage: true },
+    })
+
+    const next = mythicRevealReducer(withRoll, {
+      type: 'CHOOSE_SABOTAGE',
       payload: { targetFace: 5 },
     })
 
-    expect(next.players[1].board.sectionsRevealed).toEqual([2])
-    expect(next.pendingRoll?.canSabotage).toBe(false)
+    expect(next.players[1].board.sectionsRevealed).toEqual([2, 5])
+    expect(next.pendingRoll?.canSabotage).toBe(true)
+  })
+
+  it('removes revealed face from sabotage eligibility in same turn', () => {
+    const base = initSingle()
+    const seeded: MythicRevealState = {
+      ...base,
+      players: [
+        {
+          ...base.players[0],
+          board: {
+            ...base.players[0].board,
+            sectionsRevealed: [],
+          },
+        },
+        {
+          ...base.players[1],
+          board: {
+            ...base.players[1].board,
+            sectionsRevealed: [2, 5],
+          },
+        },
+      ],
+    }
+
+    const withRoll = mythicRevealReducer(seeded, {
+      type: 'ROLL_DICE',
+      payload: { dice: [1, 2, 2, 5, 6, 6], canSabotage: true },
+    })
+
+    const afterReveal = mythicRevealReducer(withRoll, {
+      type: 'CHOOSE_REVEAL',
+      payload: { face: 2 },
+    })
+
+    const afterSabotageAttempt = mythicRevealReducer(afterReveal, {
+      type: 'CHOOSE_SABOTAGE',
+      payload: { targetFace: 2 },
+    })
+
+    expect(afterSabotageAttempt.players[1].board.sectionsRevealed).toEqual([2, 5])
+    expect(afterSabotageAttempt.pendingRoll?.canSabotage).toBe(true)
   })
 
   it('declares winner when sixth section is revealed', () => {

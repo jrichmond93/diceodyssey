@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 const sections = [
   {
@@ -24,6 +24,9 @@ const sections = [
 ]
 
 export function VoyageHomeHowToPlayPage() {
+  const location = useLocation()
+  const fromGame = Boolean((location.state as { fromGame?: boolean } | null)?.fromGame)
+
   return (
     <main className="mx-auto w-full max-w-6xl space-y-4 p-4 md:p-6">
       <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
@@ -42,17 +45,25 @@ export function VoyageHomeHowToPlayPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            {fromGame && (
+              <Link
+                to="/games/voyage-home"
+                className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
+              >
+                Play Voyage Home
+              </Link>
+            )}
             <Link
-              to="/games/voyage-home"
+              to="/how-to-play"
               className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
             >
-              Play Voyage Home
+              How to Play
             </Link>
             <Link
               to="/"
               className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
             >
-              Back to Home
+              Home
             </Link>
           </div>
         </div>

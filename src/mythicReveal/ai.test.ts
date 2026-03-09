@@ -32,6 +32,7 @@ describe('chooseMythicRevealAction', () => {
       pendingRoll: {
         dice: [1, 2, 2, 3, 4, 6],
         canSabotage: false,
+        consumedFaces: [],
       },
       players: [
         base.players[0],
@@ -58,6 +59,7 @@ describe('chooseMythicRevealAction', () => {
       pendingRoll: {
         dice: [1, 1, 2, 2, 3, 3],
         canSabotage: true,
+        consumedFaces: [],
       },
       players: [
         {
@@ -79,7 +81,7 @@ describe('chooseMythicRevealAction', () => {
 
     expect(chooseMythicRevealAction(state)).toEqual({
       type: 'CHOOSE_SABOTAGE',
-      payload: { targetFace: 6 },
+      payload: { targetFace: 2 },
     })
   })
 
@@ -90,6 +92,7 @@ describe('chooseMythicRevealAction', () => {
       pendingRoll: {
         dice: [1, 1, 2, 2, 3, 3],
         canSabotage: false,
+        consumedFaces: [],
       },
       players: [
         base.players[0],

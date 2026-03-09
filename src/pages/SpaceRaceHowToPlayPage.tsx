@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 const gameplaySections = [
   {
@@ -32,6 +32,9 @@ const gameplaySections = [
 ]
 
 export function SpaceRaceHowToPlayPage() {
+  const location = useLocation()
+  const fromGame = Boolean((location.state as { fromGame?: boolean } | null)?.fromGame)
+
   return (
     <main className="mx-auto w-full max-w-6xl space-y-4 p-4 md:p-6">
       <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
@@ -50,23 +53,25 @@ export function SpaceRaceHowToPlayPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            {fromGame && (
+              <Link
+                to="/games/space-race"
+                className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
+              >
+                Play Space Race
+              </Link>
+            )}
             <Link
-              to="/games/space-race"
+              to="/how-to-play"
               className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
             >
-              Play Space Race
-            </Link>
-            <Link
-              to="/about"
-              className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
-            >
-              About Dice Odysseys
+              How to Play
             </Link>
             <Link
               to="/"
               className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
             >
-              Back to Home
+              Home
             </Link>
           </div>
         </div>

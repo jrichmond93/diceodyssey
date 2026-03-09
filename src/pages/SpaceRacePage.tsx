@@ -226,6 +226,7 @@ export function SpaceRacePage({
             </button>
             <Link
               to="/games/space-race/how-to-play"
+              state={{ fromGame: true }}
               className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold leading-tight text-slate-100"
             >
               How to Play

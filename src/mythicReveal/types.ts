@@ -19,6 +19,7 @@ export interface MythicRevealPlayer {
 export interface MythicRevealTurnRoll {
   dice: number[]
   canSabotage: boolean
+  consumedFaces: number[]
 }
 
 export interface MythicRevealLogEntry {

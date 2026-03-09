@@ -35,7 +35,7 @@ export function AboutPage() {
               to="/"
               className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
             >
-              Back to Home
+              Home
             </Link>
           </div>
         </div>
@@ -70,21 +70,23 @@ export function AboutPage() {
       <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
         <h2 className="text-lg font-semibold text-slate-100">Games and Roadmap</h2>
         <p className="mt-1 text-sm text-slate-300">
-          Dice Odysseys is now a multi-game platform. Space Race is the current live game, and upcoming
-          titles will launch on their own routes with corresponding how-to-play pages.
+          Dice Odysseys is now a multi-game platform with multiple live modes and more releases on the way.
         </p>
         <div className="mt-2 grid gap-3 md:grid-cols-2">
           <article className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
             <h3 className="text-sm font-semibold text-cyan-200">Live Now</h3>
-            <p className="mt-1 text-sm text-slate-300">
-              Space Race is playable now and has a dedicated guide at <code>/games/space-race/how-to-play</code>.
-            </p>
+            <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-slate-300">
+              <li>Space Race at <code>/games/space-race</code> with guide at <code>/games/space-race/how-to-play</code>.</li>
+              <li>Voyage Home at <code>/games/voyage-home</code> with guide at <code>/games/voyage-home/how-to-play</code>.</li>
+              <li>Mythic Reveal at <code>/games/mythic-reveal</code> with guide at <code>/games/mythic-reveal/how-to-play</code>.</li>
+            </ul>
           </article>
           <article className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
             <h3 className="text-sm font-semibold text-cyan-200">Future Titles</h3>
             <p className="mt-1 text-sm text-slate-300">
               Coming-soon games are visible from the home launcher. As they go live, each title will get
-              its own gameplay route and complete guide page.
+              its own gameplay route and complete guide page. Have an idea for a new game mode? Send us
+              your suggestion on the <Link to="/contact" className="font-semibold text-cyan-200 underline-offset-2 hover:underline">Contact page</Link>.
             </p>
           </article>
         </div>

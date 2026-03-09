@@ -1,4 +1,4 @@
-import { getAvailableRevealFaces, getCurrentPlayer, getOpponentPlayer } from './selectors'
+import { getAvailableRevealFaces, getAvailableSabotageFaces, getCurrentPlayer } from './selectors'
 import type { MythicRevealAction, MythicRevealPlayer, MythicRevealState } from './types'
 
 export const chooseMythicRevealAction = (
@@ -24,11 +24,11 @@ export const chooseMythicRevealAction = (
   }
 
   if (state.pendingRoll.canSabotage) {
-    const opponent = getOpponentPlayer(state)
-    if (opponent.board.sectionsRevealed.length > 0) {
-      const targetFace = [...opponent.board.sectionsRevealed].sort((a, b) => b - a)[0]
+    const sabotageFaces = getAvailableSabotageFaces(state)
+    if (sabotageFaces.length > 0) {
+      const targetFace = [...sabotageFaces].sort((a, b) => b - a)[0]
 
-      if (player.aiProfile === 'circe' || opponent.board.sectionsRevealed.length >= 5) {
+      if (player.aiProfile === 'circe' || sabotageFaces.length >= 5) {
         return { type: 'CHOOSE_SABOTAGE', payload: { targetFace } }
       }
     }

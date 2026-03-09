@@ -6,7 +6,7 @@ import {
   MYTHIC_REVEAL_SECTION_COUNT,
   SABOTAGE_TRIGGER_FACE,
 } from './constants'
-import { getCurrentPlayer, getOpponentPlayer, isPlayerComplete } from './selectors'
+import { getAvailableSabotageFaces, getCurrentPlayer, getOpponentPlayer, isPlayerComplete } from './selectors'
 import type {
   InitMythicRevealPayload,
   MythicRevealAction,
@@ -152,6 +152,7 @@ export const mythicRevealReducer = (
           pendingRoll: {
             dice: normalizedDice,
             canSabotage,
+            consumedFaces: [],
           },
         },
         `${getCurrentPlayer(state).name} rolled ${normalizedDice.join(', ')}.`,
@@ -192,6 +193,10 @@ export const mythicRevealReducer = (
         {
           ...state,
           players: nextPlayers,
+          pendingRoll: {
+            ...state.pendingRoll,
+            consumedFaces: [...new Set([...state.pendingRoll.consumedFaces, face])],
+          },
         },
         `${updatedCurrent.name} revealed section ${face}.`,
       )
@@ -220,10 +225,12 @@ export const mythicRevealReducer = (
         return state
       }
 
-      const opponent = getOpponentPlayer(state)
-      if (!opponent.board.sectionsRevealed.includes(targetFace)) {
+      const availableSabotageFaces = getAvailableSabotageFaces(state)
+      if (!availableSabotageFaces.includes(targetFace)) {
         return state
       }
+
+      const opponent = getOpponentPlayer(state)
 
       const opponentIndex = state.currentPlayerIndex === 0 ? 1 : 0
       const nextPlayers: [MythicRevealPlayer, MythicRevealPlayer] = [...state.players] as [MythicRevealPlayer, MythicRevealPlayer]

@@ -240,6 +240,7 @@ export function VoyageHomePage({
           <div className="flex flex-wrap items-center gap-1.5 pt-1 md:self-end md:pt-0">
             <Link
               to="/games/voyage-home/how-to-play"
+              state={{ fromGame: true }}
               className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold leading-tight text-slate-100"
             >
               How to Play
@@ -249,7 +250,7 @@ export function VoyageHomePage({
               className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold leading-tight text-slate-100"
               onClick={onNewGame}
             >
-              Back to Home
+              Home
             </button>
           </div>
       </header>

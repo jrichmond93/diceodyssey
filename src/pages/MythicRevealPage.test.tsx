@@ -34,6 +34,7 @@ describe('MythicRevealPage', () => {
           onSabotage={() => {}}
           onEndTurn={() => {}}
           onNewGame={() => {}}
+          onBackToHome={() => {}}
         />
       </MemoryRouter>,
     )
@@ -50,6 +51,7 @@ describe('MythicRevealPage', () => {
       pendingRoll: {
         dice: [1, 2, 2, 4, 5, 6],
         canSabotage: true,
+        consumedFaces: [],
       },
       players: [
         base.players[0],
@@ -79,6 +81,7 @@ describe('MythicRevealPage', () => {
           onSabotage={onSabotage}
           onEndTurn={() => {}}
           onNewGame={() => {}}
+          onBackToHome={() => {}}
         />
       </MemoryRouter>,
     )

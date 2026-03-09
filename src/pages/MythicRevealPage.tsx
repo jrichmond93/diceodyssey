@@ -1,6 +1,7 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getMythicImageById } from '../mythicReveal/constants'
-import { getAvailableRevealFaces, getCurrentPlayer, getOpponentPlayer } from '../mythicReveal/selectors'
+import { getAvailableRevealFaces, getAvailableSabotageFaces, getCurrentPlayer } from '../mythicReveal/selectors'
 import type { MythicRevealState } from '../mythicReveal/types'
 
 interface MythicRevealPageProps {
@@ -14,11 +15,15 @@ interface MythicRevealPageProps {
     colorClass: string
   }>
   isAiThinking: boolean
+  sabotageHitTargetFace?: number | null
+  sabotageHitPlayerId?: string | null
+  sabotageHitToken?: number
   onRoll: () => void
   onReveal: (face: number) => void
   onSabotage: (face: number) => void
   onEndTurn: () => void
   onNewGame: () => void
+  onBackToHome: () => void
 }
 
 export function MythicRevealPage({
@@ -27,18 +32,44 @@ export function MythicRevealPage({
   prefersReducedMotion,
   winConfetti,
   isAiThinking,
+  sabotageHitTargetFace,
+  sabotageHitPlayerId,
+  sabotageHitToken,
   onRoll,
   onReveal,
   onSabotage,
   onEndTurn,
   onNewGame,
+  onBackToHome,
 }: MythicRevealPageProps) {
+  const [activeSabotageHit, setActiveSabotageHit] = useState<{
+    playerId: string
+    face: number
+    token: number
+  } | null>(null)
+
+  useEffect(() => {
+    if (!sabotageHitPlayerId || !sabotageHitTargetFace || sabotageHitToken === undefined) {
+      setActiveSabotageHit(null)
+      return
+    }
+
+    setActiveSabotageHit({
+      playerId: sabotageHitPlayerId,
+      face: sabotageHitTargetFace,
+      token: sabotageHitToken,
+    })
+
+    const timer = window.setTimeout(() => {
+      setActiveSabotageHit((current) => (current?.token === sabotageHitToken ? null : current))
+    }, 500)
+
+    return () => window.clearTimeout(timer)
+  }, [sabotageHitPlayerId, sabotageHitTargetFace, sabotageHitToken])
+
   const currentPlayer = getCurrentPlayer(state)
-  const opponent = getOpponentPlayer(state)
   const revealFaces = getAvailableRevealFaces(state)
-  const sabotageFaces = state.pendingRoll?.canSabotage
-    ? [...opponent.board.sectionsRevealed].sort((a, b) => a - b)
-    : []
+  const sabotageFaces = getAvailableSabotageFaces(state)
   const canAct = state.started && !state.winnerId && !currentPlayer.isAI && !isAiThinking
   const actionPrompt = !state.pendingRoll
     ? 'Roll to generate reveal options.'
@@ -94,6 +125,7 @@ export function MythicRevealPage({
         <div className="flex flex-wrap items-center gap-2">
           <Link
             to="/games/mythic-reveal/how-to-play"
+            state={{ fromGame: true }}
             className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
           >
             How to Play
@@ -101,26 +133,28 @@ export function MythicRevealPage({
           <button
             type="button"
             className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
-            onClick={onNewGame}
+            onClick={onBackToHome}
           >
-            Back to Home
+            Home
           </button>
         </div>
       </header>
 
       {state.winnerId && (
-        <section className="rounded-xl border border-emerald-400 bg-emerald-900/30 p-4 text-emerald-100">
+        <section className="rounded-xl border border-emerald-300/90 bg-emerald-900/45 p-4 text-emerald-50 shadow-[0_0_0_1px_rgba(52,211,153,0.35),0_0_24px_rgba(16,185,129,0.18)]">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <p className="font-semibold">Winner: {winnerPlayer?.name ?? 'Captain'}</p>
-              <p className="mt-1 text-sm text-emerald-200">A full prophecy has been revealed.</p>
+              <p className="text-lg font-extrabold tracking-wide text-emerald-100 drop-shadow-[0_0_8px_rgba(110,231,183,0.45)]">
+                Winner: {winnerPlayer?.name ?? 'Captain'}
+              </p>
+              <p className="mt-1 text-sm font-semibold text-emerald-100">A full prophecy has been revealed.</p>
               {winnerImageEntry?.description && (
-                <p className="mt-1 text-sm text-emerald-100/95">Revealed vision: {winnerImageEntry.description}</p>
+                <p className="mt-1 text-sm font-semibold text-emerald-100">Revealed vision: {winnerImageEntry.description}</p>
               )}
             </div>
             <button
               type="button"
-              className="rounded border border-emerald-300 px-2 py-1 text-xs font-semibold text-emerald-100"
+              className="rounded border border-emerald-200 bg-emerald-700/35 px-2 py-1 text-xs font-bold text-emerald-50"
               onClick={onNewGame}
             >
               New Game
@@ -152,6 +186,8 @@ export function MythicRevealPage({
                 {Array.from({ length: 6 }, (_, index) => {
                   const face = index + 1
                   const isRevealed = revealed.has(face)
+                  const isSabotageHit =
+                    activeSabotageHit?.playerId === player.id && activeSabotageHit.face === face
                   const row = Math.floor(index / 3)
                   const col = index % 3
                   const backgroundStyle = imageSrc
@@ -168,6 +204,8 @@ export function MythicRevealPage({
                       className={`relative overflow-hidden ${
                         boardFullyRevealed
                           ? ''
+                          : isSabotageHit
+                          ? 'shadow-[inset_0_0_0_1px_rgba(248,113,113,0.95),inset_0_0_16px_rgba(239,68,68,0.6)]'
                           : isRevealed
                           ? 'shadow-[inset_0_0_0_1px_rgba(16,185,129,0.7),inset_0_0_14px_rgba(16,185,129,0.35)]'
                           : 'shadow-[inset_0_0_0_1px_rgba(51,65,85,0.75)]'
@@ -182,9 +220,18 @@ export function MythicRevealPage({
 
                       <div
                         className="absolute inset-0 bg-slate-950/80 transition-opacity duration-500 ease-out"
-                        style={{ opacity: boardFullyRevealed ? 0 : isRevealed ? 0 : 0.82 }}
+                        style={{ opacity: boardFullyRevealed ? 0 : isRevealed ? 0 : isSabotageHit ? 0.2 : 0.82 }}
                         aria-hidden="true"
                       />
+
+                      {isSabotageHit && (
+                        <>
+                          <div className="pointer-events-none absolute inset-0 bg-rose-500/35 animate-pulse" aria-hidden="true" />
+                          <div className="pointer-events-none absolute left-1/2 top-0 h-full w-[2px] -translate-x-1/2 rotate-[12deg] bg-rose-200/90" aria-hidden="true" />
+                          <div className="pointer-events-none absolute left-1/3 top-0 h-full w-[1px] rotate-[-14deg] bg-rose-300/70" aria-hidden="true" />
+                          <div className="pointer-events-none absolute right-1/3 top-0 h-full w-[1px] rotate-[20deg] bg-rose-300/70" aria-hidden="true" />
+                        </>
+                      )}
 
                       <div
                         className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_25%_20%,rgba(110,231,183,0.42),rgba(15,23,42,0))] transition-opacity duration-500"

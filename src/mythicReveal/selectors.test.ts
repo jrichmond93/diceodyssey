@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getAvailableRevealFaces, isPlayerComplete } from './selectors'
+import { getAvailableRevealFaces, getAvailableSabotageFaces, isPlayerComplete } from './selectors'
 import { initialMythicRevealState, mythicRevealReducer } from './reducer'
 import type { MythicRevealState } from './types'
 
@@ -22,6 +22,7 @@ describe('mythicReveal selectors', () => {
       pendingRoll: {
         dice: [6, 2, 2, 4, 6, 1],
         canSabotage: true,
+        consumedFaces: [],
       },
       players: [
         {
@@ -49,5 +50,29 @@ describe('mythicReveal selectors', () => {
     }
 
     expect(isPlayerComplete(player)).toBe(true)
+  })
+
+  it('returns sabotage choices from rolled rival sections excluding consumed reveal faces', () => {
+    const base = initSingle()
+    const state: MythicRevealState = {
+      ...base,
+      pendingRoll: {
+        dice: [1, 2, 2, 4, 5, 6],
+        canSabotage: true,
+        consumedFaces: [4],
+      },
+      players: [
+        base.players[0],
+        {
+          ...base.players[1],
+          board: {
+            ...base.players[1].board,
+            sectionsRevealed: [3, 4, 5],
+          },
+        },
+      ],
+    }
+
+    expect(getAvailableSabotageFaces(state)).toEqual([5])
   })
 })

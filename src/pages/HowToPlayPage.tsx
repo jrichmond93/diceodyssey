@@ -12,19 +12,28 @@ export function HowToPlayPage() {
     <main className="mx-auto w-full max-w-6xl space-y-4 p-4 md:p-6">
       <section className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-cyan-200">How to Play Dice Odysseys</h1>
-            <p className="mt-1 max-w-3xl text-sm text-slate-300">
-              Dice Odysseys is a turn-based strategy collection where each game has its own rules and tempo. Start here for the basics,
-              then jump into each game-specific guide.
-            </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link to="/" aria-label="Go to Home" className="shrink-0">
+              <img
+                src="/assets/branding/dice-odyssey-logo.png"
+                alt="Dice Odysseys logo"
+                className="h-14 w-14 rounded-md border border-slate-700 object-cover"
+              />
+            </Link>
+            <div>
+              <h1 className="text-2xl font-bold text-cyan-200">How to Play Dice Odysseys</h1>
+              <p className="mt-1 max-w-3xl text-sm text-slate-300">
+                Dice Odysseys is a turn-based strategy collection where each game has its own rules and tempo. Start here for the basics,
+                then jump into each game-specific guide.
+              </p>
+            </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
               to="/"
               className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
             >
-              Back to Home
+              Home
             </Link>
           </div>
         </div>
@@ -43,10 +52,9 @@ export function HowToPlayPage() {
       <section className="space-y-2 rounded-xl border border-slate-700 bg-slate-950/70 p-4">
         <h2 className="text-lg font-semibold text-slate-100">Game Guides</h2>
         <div className="grid gap-3 md:grid-cols-2">
-          {GAME_CATALOG.map((game) => {
+          {GAME_CATALOG.flatMap((game) => {
             const guidePath = GUIDE_PATH_BY_GAME_SLUG[game.slug]
-
-            return (
+            const gameTile = (
               <article key={game.slug} className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-cyan-200">{game.name}</h3>
@@ -71,6 +79,21 @@ export function HowToPlayPage() {
                 </div>
               </article>
             )
+
+            if (game.slug !== 'mythic-reveal') {
+              return [gameTile]
+            }
+
+            return [
+              gameTile,
+              <article key="space-race-branding-tile" className="rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+                <img
+                  src="/assets/branding/space-race.jpg"
+                  alt="Space Race key art"
+                  className="mt-2 h-20 w-full rounded-md border border-slate-700 object-cover"
+                />
+              </article>,
+            ]
           })}
         </div>
       </section>

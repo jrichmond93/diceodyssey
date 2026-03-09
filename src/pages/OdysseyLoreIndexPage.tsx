@@ -62,11 +62,32 @@ export function OdysseyLoreIndexPage() {
     <main className="mx-auto w-full max-w-6xl space-y-4 p-4 md:p-6">
       <section className="overflow-hidden rounded-xl border border-slate-700 bg-slate-950/70">
         <div className="border-b border-slate-700 bg-gradient-to-r from-slate-900 via-cyan-950/40 to-slate-900 p-4 md:p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Odyssey Lore</p>
-          <h1 className="mt-2 text-3xl font-bold text-cyan-100 md:text-4xl">The Journey of Odysseus</h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-300 md:text-base">
-            Read every major stop in the Odyssey arc, from the first tales at Scheria to the return and reckoning in Ithaca.
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Link to="/" aria-label="Go to Home" className="shrink-0">
+                <img
+                  src="/assets/branding/dice-odyssey-logo.png"
+                  alt="Dice Odysseys logo"
+                  className="h-14 w-14 rounded-md border border-slate-700 object-cover"
+                />
+              </Link>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Odyssey Lore</p>
+                <h1 className="mt-2 text-3xl font-bold text-cyan-100 md:text-4xl">The Journey of Odysseus</h1>
+                <p className="mt-2 max-w-3xl text-sm text-slate-300 md:text-base">
+                  Read every major stop in the Odyssey arc, from the first tales at Scheria to the return and reckoning in Ithaca.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                to="/"
+                className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
+              >
+                Home
+              </Link>
+            </div>
+          </div>
         </div>
 
         <div className="p-4 text-sm text-slate-300 md:p-6">

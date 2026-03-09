@@ -22,7 +22,7 @@ export function ContactPage() {
             to="/"
             className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
           >
-            ← Back to Home
+            Home
           </Link>
         </div>
       </section>

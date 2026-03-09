@@ -72,7 +72,7 @@ export function OpponentsPage() {
             state={fromGame ? { fromGame: true } : undefined}
             className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
           >
-            {fromGame ? '← Back to Game' : '← Back to Home'}
+            {fromGame ? '← Back to Game' : 'Home'}
           </Link>
         </div>
       </section>
