@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 
 const baseLinkClass =
-  'rounded-md border px-3 py-1.5 text-sm font-semibold transition-colors'
+  'w-full rounded-md border px-3 py-1.5 text-center text-sm font-semibold transition-colors sm:w-auto'
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `${baseLinkClass} ${
@@ -115,7 +115,10 @@ export function AppFooter() {
           ))}
         </div>
 
-        <nav aria-label="Site pages" className="flex flex-wrap items-center gap-2 xl:ml-auto xl:flex-nowrap xl:justify-end">
+        <nav
+          aria-label="Site pages"
+          className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center xl:ml-auto xl:flex-nowrap xl:justify-end"
+        >
           <NavLink to="/" className={navLinkClass} end>
             Home
           </NavLink>

@@ -7,10 +7,20 @@ import { useAuth0 } from '@auth0/auth0-react'
 import { AppFooter } from './components/AppFooter'
 import { ResolveDiceAnimation } from './components/ResolveDiceAnimation'
 import { AboutPage } from './pages/AboutPage'
+import { AeolusAndWindsPage } from './pages/AeolusAndWindsPage'
+import { ApologoiPage } from './pages/ApologoiPage'
+import { OdysseyLoreIndexPage } from './pages/OdysseyLoreIndexPage'
 import { ContactPage } from './pages/ContactPage'
+import { CyclopsPolyphemusPage } from './pages/CyclopsPolyphemusPage'
 import { FAQ_ITEMS, FaqPage } from './pages/FaqPage'
 import { HowToPlayPage } from './pages/HowToPlayPage'
+import { LaestrygoniansPage } from './pages/LaestrygoniansPage'
 import { LegalPage } from './pages/LegalPage'
+import { LotusEatersPage } from './pages/LotusEatersPage'
+import { CircesIslandPage } from './pages/CircesIslandPage'
+import { UnderworldTiresiasPage } from './pages/UnderworldTiresiasPage'
+import { SirensScyllaCharybdisPage } from './pages/SirensScyllaCharybdisPage'
+import { ReturnToIthacaPage } from './pages/ReturnToIthacaPage'
 import { OpponentBioPage } from './pages/OpponentBioPage'
 import { OpponentsPage } from './pages/OpponentsPage'
 import { ProfilePage } from './pages/ProfilePage'
@@ -358,6 +368,16 @@ function App() {
   const isSpaceRaceHowToPlayPath = pathname === `/games/${SPACE_RACE_GAME.slug}/how-to-play`
   const isVoyageHomeHowToPlayPath = pathname === '/games/voyage-home/how-to-play'
   const isMythicRevealHowToPlayPath = pathname === '/games/mythic-reveal/how-to-play'
+  const isOdysseyLorePath = pathname === '/odyssey'
+  const isApologoiPath = pathname === '/odyssey/apologoi'
+  const isLotusEatersPath = pathname === '/odyssey/lotus-eaters'
+  const isCyclopsPolyphemusPath = pathname === '/odyssey/cyclops-polyphemus'
+  const isAeolusAndWindsPath = pathname === '/odyssey/aeolus-and-the-winds'
+  const isLaestrygoniansPath = pathname === '/odyssey/laestrygonians'
+  const isCircesIslandPath = pathname === '/odyssey/circes-island'
+  const isUnderworldTiresiasPath = pathname === '/odyssey/underworld-tiresias'
+  const isSirensScyllaCharybdisPath = pathname === '/odyssey/sirens-scylla-charybdis'
+  const isReturnToIthacaPath = pathname === '/odyssey/return-to-ithaca'
   const isHowToPlayPath = pathname === '/how-to-play'
   const opponentBioSlug = getOpponentBioSlug(pathname)
   const gameSlugFromPath = getGameSlugFromPath(pathname)
@@ -405,6 +425,7 @@ function App() {
   const [presenceSnapshot, setPresenceSnapshot] = useState<PresenceSnapshotPayload | null>(null)
   const [isVoyageAiThinking, setIsVoyageAiThinking] = useState(false)
   const [isVoyageRollAnimating, setIsVoyageRollAnimating] = useState(false)
+  const [homeNavOpen, setHomeNavOpen] = useState(false)
   const [voyageRollAnimationPlayerName, setVoyageRollAnimationPlayerName] = useState<string | undefined>(undefined)
   const [voyageRollAnimationPlayerId, setVoyageRollAnimationPlayerId] = useState<string | undefined>(undefined)
   const [voyageRollAnimationDieColor, setVoyageRollAnimationDieColor] = useState<VoyageRollDieColor>('blue')
@@ -590,6 +611,96 @@ function App() {
           description:
             'Learn Mythic Reveal rules, one-reveal turns, sabotage timing, and prophecy race strategy in the complete guide.',
           path: '/games/mythic-reveal/how-to-play',
+        }
+      }
+
+      if (isOdysseyLorePath) {
+        return {
+          title: 'Odyssey Lore | Dice Odysseys',
+          description:
+            'Browse every Odyssey lore chapter, from the Apologoi through the return to Ithaca, in one structured guide index.',
+          path: '/odyssey',
+        }
+      }
+
+      if (isApologoiPath) {
+        return {
+          title: 'What Are the Apologoi? | Dice Odysseys',
+          description:
+            'A quick introduction to Odysseus\' storytelling session with the Phaeacians and why the Apologoi are the heart of the Odyssey.',
+          path: '/odyssey/apologoi',
+        }
+      }
+
+      if (isLotusEatersPath) {
+        return {
+          title: 'Lotus-Eaters | Dice Odysseys',
+          description:
+            'Explore the Lotus-Eaters episode from the Odyssey and why it remains a timeless warning about distraction and complacency.',
+          path: '/odyssey/lotus-eaters',
+        }
+      }
+
+      if (isCyclopsPolyphemusPath) {
+        return {
+          title: 'Cyclops (Polyphemus) | Dice Odysseys',
+          description:
+            'Explore the Cyclops episode in the Odyssey, from the Nobody ruse to the warning about hubris, pride, and consequence.',
+          path: '/odyssey/cyclops-polyphemus',
+        }
+      }
+
+      if (isAeolusAndWindsPath) {
+        return {
+          title: 'Aeolus & the Winds | Dice Odysseys',
+          description:
+            'Explore Aeolus\' bag of winds episode and its warning about suspicion, curiosity, and self-sabotage on the road home.',
+          path: '/odyssey/aeolus-and-the-winds',
+        }
+      }
+
+      if (isLaestrygoniansPath) {
+        return {
+          title: 'Laestrygonians | Dice Odysseys',
+          description:
+            'Explore the Laestrygonians episode and its warning about survival when overwhelming odds erase nearly everything at once.',
+          path: '/odyssey/laestrygonians',
+        }
+      }
+
+      if (isCircesIslandPath) {
+        return {
+          title: "Circe's Island | Dice Odysseys",
+          description:
+            'Explore Circe\'s transformation magic, Odysseus\' resistance, and the warning about enchantment\'s double edge.',
+          path: '/odyssey/circes-island',
+        }
+      }
+
+      if (isUnderworldTiresiasPath) {
+        return {
+          title: 'Underworld (Tiresias) | Dice Odysseys',
+          description:
+            'Explore Odysseus\' descent to the Underworld and Tiresias\' prophecies about fate, sacrifice, and the limits of knowledge.',
+          path: '/odyssey/underworld-tiresias',
+        }
+      }
+
+      if (isSirensScyllaCharybdisPath) {
+        return {
+          title: 'Sirens & Scylla/Charybdis | Dice Odysseys',
+          description:
+            'Explore the Sirens, Scylla, and Charybdis episodes as a warning about deadly temptations and impossible choices at sea.',
+          path: '/odyssey/sirens-scylla-charybdis',
+        }
+      }
+
+      if (isReturnToIthacaPath) {
+        return {
+          title: 'Return to Ithaca | Dice Odysseys',
+          description:
+            'Explore the Odyssey\'s homecoming finale: Odysseus\' return, the suitors\' defeat, and the restoration of order in Ithaca.',
+          path: '/odyssey/return-to-ithaca',
         }
       }
 
@@ -834,6 +945,85 @@ function App() {
         ]
       }
 
+      if (isOdysseyLorePath) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Odyssey Lore', path: '/odyssey' },
+        ]
+      }
+
+      if (isApologoiPath) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Odyssey Lore', path: '/odyssey' },
+          { name: 'What Are the Apologoi?', path: '/odyssey/apologoi' },
+        ]
+      }
+
+      if (isLotusEatersPath) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Odyssey Lore', path: '/odyssey' },
+          { name: 'Lotus-Eaters', path: '/odyssey/lotus-eaters' },
+        ]
+      }
+
+      if (isCyclopsPolyphemusPath) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Odyssey Lore', path: '/odyssey' },
+          { name: 'Cyclops (Polyphemus)', path: '/odyssey/cyclops-polyphemus' },
+        ]
+      }
+
+      if (isAeolusAndWindsPath) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Odyssey Lore', path: '/odyssey' },
+          { name: 'Aeolus & the Winds', path: '/odyssey/aeolus-and-the-winds' },
+        ]
+      }
+
+      if (isLaestrygoniansPath) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Odyssey Lore', path: '/odyssey' },
+          { name: 'Laestrygonians', path: '/odyssey/laestrygonians' },
+        ]
+      }
+
+      if (isCircesIslandPath) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Odyssey Lore', path: '/odyssey' },
+          { name: "Circe's Island", path: '/odyssey/circes-island' },
+        ]
+      }
+
+      if (isUnderworldTiresiasPath) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Odyssey Lore', path: '/odyssey' },
+          { name: 'Underworld (Tiresias)', path: '/odyssey/underworld-tiresias' },
+        ]
+      }
+
+      if (isSirensScyllaCharybdisPath) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Odyssey Lore', path: '/odyssey' },
+          { name: 'Sirens & Scylla/Charybdis', path: '/odyssey/sirens-scylla-charybdis' },
+        ]
+      }
+
+      if (isReturnToIthacaPath) {
+        return [
+          { name: 'Home', path: '/' },
+          { name: 'Odyssey Lore', path: '/odyssey' },
+          { name: 'Return to Ithaca', path: '/odyssey/return-to-ithaca' },
+        ]
+      }
+
       if (pathname === '/opponents') {
         return [
           { name: 'Home', path: '/' },
@@ -913,7 +1103,7 @@ function App() {
           }
         : null,
     )
-  }, [isSpaceRaceHowToPlayPath, isVoyageHomeHowToPlayPath, isMythicRevealHowToPlayPath, isHowToPlayPath, pathname, opponentBioSlug])
+  }, [isSpaceRaceHowToPlayPath, isVoyageHomeHowToPlayPath, isMythicRevealHowToPlayPath, isOdysseyLorePath, isApologoiPath, isLotusEatersPath, isCyclopsPolyphemusPath, isAeolusAndWindsPath, isLaestrygoniansPath, isCircesIslandPath, isUnderworldTiresiasPath, isSirensScyllaCharybdisPath, isReturnToIthacaPath, isHowToPlayPath, pathname, opponentBioSlug])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -3377,6 +3567,96 @@ function App() {
     )
   }
 
+  if (isOdysseyLorePath) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <OdysseyLoreIndexPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (isApologoiPath) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <ApologoiPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (isLotusEatersPath) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <LotusEatersPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (isCyclopsPolyphemusPath) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <CyclopsPolyphemusPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (isAeolusAndWindsPath) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <AeolusAndWindsPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (isLaestrygoniansPath) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <LaestrygoniansPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (isCircesIslandPath) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <CircesIslandPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (isUnderworldTiresiasPath) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <UnderworldTiresiasPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (isSirensScyllaCharybdisPath) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <SirensScyllaCharybdisPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
+  if (isReturnToIthacaPath) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <ReturnToIthacaPage />
+        <AppFooter />
+      </div>
+    )
+  }
+
   if (isSpaceRaceHowToPlayPath) {
     return (
       <div className="flex min-h-screen flex-col">
@@ -3609,7 +3889,24 @@ function App() {
                 <h1 className="text-[2.1rem] font-bold text-cyan-200">Dice Odysseys</h1>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100 md:hidden"
+              onClick={() => setHomeNavOpen((open) => !open)}
+              aria-expanded={homeNavOpen}
+              aria-controls="home-primary-nav"
+              aria-label="Toggle navigation menu"
+            >
+              <span className="flex w-4 flex-col gap-1" aria-hidden="true">
+                <span className="h-0.5 w-full bg-slate-100" />
+                <span className="h-0.5 w-full bg-slate-100" />
+                <span className="h-0.5 w-full bg-slate-100" />
+              </span>
+              {homeNavOpen ? 'Close' : 'Menu'}
+            </button>
+
+            <div className="hidden items-center gap-2 md:flex">
               <Link
                 to="/profile"
                 className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
@@ -3634,7 +3931,56 @@ function App() {
               >
                 How to Play
               </Link>
+              <Link
+                to="/odyssey"
+                className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
+              >
+                Odyssey Lore
+              </Link>
             </div>
+
+            {homeNavOpen ? (
+              <div
+                id="home-primary-nav"
+                className="grid w-full gap-2 border-t border-slate-700 pt-3 md:hidden"
+              >
+                <Link
+                  to="/profile"
+                  className="rounded-md border border-slate-600 px-3 py-2 text-sm font-semibold text-slate-100"
+                  onClick={() => setHomeNavOpen(false)}
+                >
+                  {isAuthenticated ? 'Your Profile' : 'Log In'}
+                </Link>
+                <Link
+                  to="/opponents"
+                  className="rounded-md border border-slate-600 px-3 py-2 text-sm font-semibold text-slate-100"
+                  onClick={() => setHomeNavOpen(false)}
+                >
+                  Opponents
+                </Link>
+                <Link
+                  to="/about"
+                  className="rounded-md border border-slate-600 px-3 py-2 text-sm font-semibold text-slate-100"
+                  onClick={() => setHomeNavOpen(false)}
+                >
+                  About
+                </Link>
+                <Link
+                  to="/how-to-play"
+                  className="rounded-md border border-slate-600 px-3 py-2 text-sm font-semibold text-slate-100"
+                  onClick={() => setHomeNavOpen(false)}
+                >
+                  How to Play
+                </Link>
+                <Link
+                  to="/odyssey"
+                  className="rounded-md border border-slate-600 px-3 py-2 text-sm font-semibold text-slate-100"
+                  onClick={() => setHomeNavOpen(false)}
+                >
+                  Odyssey Lore
+                </Link>
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
@@ -4062,22 +4408,6 @@ function App() {
             </div>
 
             <aside className="grid gap-3 xl:content-start">
-              <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-                <h2 className="text-sm font-semibold text-cyan-200">More Content Coming Soon</h2>
-                <p className="mt-1 text-xs text-slate-300">
-                  We are expanding Dice Odysseys with new guides, strategy spotlights, and game pages.
-                  For now, visit Space Race How to Play for the full rules and tactical overview.
-                </p>
-                <div className="mt-2">
-                  <Link
-                    to="/games/space-race/how-to-play"
-                    className="inline-flex rounded border border-slate-600 px-2 py-1 text-[11px] font-semibold text-cyan-200 hover:border-slate-500"
-                  >
-                    Read Space Race Guide
-                  </Link>
-                </div>
-              </article>
-
               {featuredHomeOpponent && (
                 <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
                   <h2 className="text-sm font-semibold text-cyan-200">Featured Opponent</h2>
@@ -4114,6 +4444,21 @@ function App() {
                     </li>
                   ))}
                 </ul>
+              </article>
+
+              <article className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
+                <h2 className="text-sm font-semibold text-cyan-200">Help Shape Future Games</h2>
+                <p className="mt-1 text-xs text-slate-300">
+                  Share feedback, report ideas, or tell us what game themes you want to see next in Dice Odysseys.
+                </p>
+                <div className="mt-2">
+                  <Link
+                    to="/contact"
+                    className="inline-flex rounded border border-slate-600 px-2 py-1 text-[11px] font-semibold text-cyan-200 hover:border-slate-500"
+                  >
+                    Send Feedback
+                  </Link>
+                </div>
               </article>
             </aside>
           </div>

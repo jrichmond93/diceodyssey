@@ -20,10 +20,10 @@ export function AboutPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
-              to="/games/space-race/how-to-play"
+              to="/how-to-play"
               className="rounded-md border border-slate-600 px-3 py-1.5 text-sm font-semibold text-slate-100"
             >
-              Space Race How to Play
+              How To Play
             </Link>
             <Link
               to="/legal"

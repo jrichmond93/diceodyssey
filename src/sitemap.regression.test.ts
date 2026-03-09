@@ -11,6 +11,16 @@ describe('sitemap regression coverage', () => {
 
     const requiredUrls = [
       'https://diceodysseys.com/how-to-play',
+      'https://diceodysseys.com/odyssey',
+      'https://diceodysseys.com/odyssey/apologoi',
+      'https://diceodysseys.com/odyssey/lotus-eaters',
+      'https://diceodysseys.com/odyssey/cyclops-polyphemus',
+      'https://diceodysseys.com/odyssey/aeolus-and-the-winds',
+      'https://diceodysseys.com/odyssey/laestrygonians',
+      'https://diceodysseys.com/odyssey/circes-island',
+      'https://diceodysseys.com/odyssey/underworld-tiresias',
+      'https://diceodysseys.com/odyssey/sirens-scylla-charybdis',
+      'https://diceodysseys.com/odyssey/return-to-ithaca',
       'https://diceodysseys.com/games/space-race',
       'https://diceodysseys.com/games/space-race/how-to-play',
       'https://diceodysseys.com/games/voyage-home',
